@@ -11,13 +11,14 @@ void cpu_exec(uint64_t);
 
 /* We use the `readline' library to provide more flexibility to read from stdin. */
 char* rl_gets() {
+  // 清空文本输入缓冲区，准备接受新的输入
   static char *line_read = NULL;
-
   if (line_read) {
     free(line_read);
     line_read = NULL;
   }
 
+  // 获取用户输入的字符串指针
   line_read = readline("(nemu) ");
 
   if (line_read && *line_read) {
@@ -53,6 +54,8 @@ static struct {
 
 #define NR_CMD (sizeof(cmd_table) / sizeof(cmd_table[0]))
 
+// help ：打印所有命令的帮助信息，
+// help <command> ：打印特定命令的帮助信息
 static int cmd_help(char *args) {
   /* extract the first argument */
   char *arg = strtok(NULL, " ");
@@ -67,10 +70,12 @@ static int cmd_help(char *args) {
   else {
     for (i = 0; i < NR_CMD; i ++) {
       if (strcmp(arg, cmd_table[i].name) == 0) {
+        // 匹配
         printf("%s - %s\n", cmd_table[i].name, cmd_table[i].description);
         return 0;
       }
     }
+    // 没有匹配
     printf("Unknown command '%s'\n", arg);
   }
   return 0;

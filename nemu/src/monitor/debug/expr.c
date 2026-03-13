@@ -7,9 +7,16 @@
 #include <regex.h>
 
 enum {
-  TK_NOTYPE = 256, TK_EQ
+  TK_NOTYPE = 256, TK_EQ,
 
   /* TODO: Add more token types */
+  TK_NUM, // 十进制数字
+  TK_HEX, // 十六进制数字
+  TK_REG, // 寄存器
+  TK_NEQ, // 不等于
+  TK_AND, // 逻辑与
+  TK_DEREF, // 解引用
+  TK_NEG // 负号
 
 };
 
@@ -18,13 +25,23 @@ static struct rule {
   int token_type;
 } rules[] = {
 
-  /* TODO: Add more rules.
+    /* TODO: Add more rules.
    * Pay attention to the precedence level of different rules.
    */
 
-  {" +", TK_NOTYPE},    // spaces
-  {"\\+", '+'},         // plus
-  {"==", TK_EQ}         // equal
+  {" +", TK_NOTYPE},              // spaces
+  {"\\+", '+'},                   // plus
+  {"-", '-'},                     // minus
+  {"\\*", '*'},                   
+  {"/", '/'},                     
+  {"\\(", '('},                  
+  {"\\)", ')'},                   
+  {"==", TK_EQ},                 
+  {"!=", TK_NEQ},                
+  {"&&", TK_AND},                
+  {"0[xX][0-9a-fA-F]+", TK_HEX},  // hexadecimal number
+  {"[0-9]+", TK_NUM},             // decimal number
+  {"\\$[a-zA-Z][a-zA-Z0-9]*", TK_REG}  // register
 };
 
 #define NR_REGEX (sizeof(rules) / sizeof(rules[0]) )
@@ -80,7 +97,32 @@ static bool make_token(char *e) {
          */
 
         switch (rules[i].token_type) {
-          default: TODO();
+          case TK_NOTYPE:
+            // 忽略空格，不记录到tokens数组中
+            break;
+
+          case TK_NUM:
+          case TK_HEX:
+          case TK_REG:
+            // token 数量不能超过32
+            Assert(nr_token < 32, "too many tokens");
+            // 记录token类型和字符串内容
+            tokens[nr_token].type = rules[i].token_type;
+            Assert(substr_len < (int)sizeof(tokens[nr_token].str), "token is too long");
+            strncpy(tokens[nr_token].str, substr_start, substr_len);
+            // 添加字符串结束符
+            tokens[nr_token].str[substr_len] = '\0';
+            nr_token ++;
+            break;
+
+          default:
+            // 剩下的符号类token，直接记录类型，不需要字符串内容
+            Assert(nr_token < 32, "too many tokens");
+            // 记录token类型，字符串内容置空
+            tokens[nr_token].type = rules[i].token_type;
+            tokens[nr_token].str[0] = '\0';
+            nr_token ++;
+            break;
         }
 
         break;
@@ -93,9 +135,34 @@ static bool make_token(char *e) {
     }
   }
 
+  // 处理一元运算符：解引用和负号
+  int j;
+  for (j = 0; j < nr_token; j ++) {
+    // 如果当前token是*，并且它是第一个token，或者前一个token不是数字、寄存器或右括号，那么它就是解引用符
+    if (tokens[j].type == '*' &&
+        (j == 0 ||
+         (tokens[j - 1].type != TK_NUM &&
+          tokens[j - 1].type != TK_HEX &&
+          tokens[j - 1].type != TK_REG &&
+          tokens[j - 1].type != ')'))) {
+      tokens[j].type = TK_DEREF;
+    }
+
+    // 如果当前token是-，并且它是第一个token，或者前一个token不是数字、寄存器或右括号，那么它就是负号
+    if (tokens[j].type == '-' &&
+        (j == 0 ||
+         (tokens[j - 1].type != TK_NUM &&
+          tokens[j - 1].type != TK_HEX &&
+          tokens[j - 1].type != TK_REG &&
+          tokens[j - 1].type != ')'))) {
+      tokens[j].type = TK_NEG;
+    }
+  }
+
   return true;
 }
 
+// 计算表达式e的值，成功返回结果，失败返回0
 uint32_t expr(char *e, bool *success) {
   if (!make_token(e)) {
     *success = false;
