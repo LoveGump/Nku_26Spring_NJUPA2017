@@ -3,6 +3,7 @@
 /* We use the POSIX regex functions to process regular expressions.
  * Type 'man regex' for more information about POSIX regex functions.
  */
+#include <stdlib.h>
 #include <sys/types.h>
 #include <regex.h>
 
@@ -161,6 +162,212 @@ static bool make_token(char *e) {
 
   return true;
 }
+/**
+ * 获取寄存器的值
+ * @param s The string representing the register.
+ * @param success A pointer to a boolean indicating whether the operation was successful.
+ * @return The value of the register.
+ */
+static uint32_t reg_value(const char *s, bool *success) {
+  int i;
+  // 去掉$
+  const char *name = s[0] == '$' ? s + 1 : s;
+
+  // 处理 eip 寄存器
+  if (strcmp(name, "eip") == 0) {
+    *success = true;
+    return cpu.eip;
+  }
+
+  // 处理通用寄存器
+  for (i = 0; i < 8; i ++) {
+    if (strcmp(name, regsl[i]) == 0) {
+      *success = true;
+      return reg_l(i);
+    }
+    if (strcmp(name, regsw[i]) == 0) {
+      *success = true;
+      return reg_w(i);
+    }
+    if (strcmp(name, regsb[i]) == 0) {
+      *success = true;
+      return reg_b(i);
+    }
+  }
+
+  // 没有找到匹配的寄存器
+  *success = false;
+  return 0;
+}
+
+// 判断tokens[p..q]是否被一对匹配的括号包围
+static bool check_parentheses(int p, int q) {
+  if (tokens[p].type != '(' || tokens[q].type != ')') {
+    return false;
+  }
+
+  // 如果被括号包围，检查括号是否匹配
+  int level = 0;
+  int i;
+  for (i = p; i <= q; i ++) {
+    if (tokens[i].type == '(') {
+      level ++;
+    }
+    else if (tokens[i].type == ')') {
+      level --;
+      if (level == 0 && i < q) {
+        return false;
+      }
+      if (level < 0) {
+        return false;
+      }
+    }
+  }
+
+  return level == 0;
+}
+
+// 返回运算符的优先级，数字越大优先级越高
+static int precedence(int type) {
+  switch (type) {
+    case TK_AND: return 1;
+    case TK_EQ:
+    case TK_NEQ: return 2;
+    case '+':
+    case '-': return 3;
+    case '*':
+    case '/': return 4;
+    case TK_NEG:
+    case TK_DEREF: return 5;
+    default: return 0;
+  }
+}
+
+// 找到tokens[p..q]中优先级最低的运算符的位置
+static int dominant_operator(int p, int q) {
+  int op = -1;        // 最低优先级位置
+  int min_pri = 100; 
+  int level = 0;      // 括号层数
+  int i;
+
+  // 扫描寻找
+  for (i = p; i <= q; i ++) {
+    int type = tokens[i].type;
+
+    if (type == '(') {
+      level ++;
+      continue;
+    }
+    if (type == ')') {
+      level --;
+      continue;
+    }
+    if (level != 0) {
+      // 在括号内的运算符不考虑
+      continue;
+    }
+
+    if (type == TK_NUM || type == TK_HEX || type == TK_REG) {
+      // 数字和寄存器不是运算符，跳过
+      continue;
+    }
+
+    if (precedence(type) > 0 && precedence(type) <= min_pri) {
+      // 找到更低优先级的运算符，更新结果
+      min_pri = precedence(type);
+      op = i;
+    }
+  }
+
+  return op;
+}
+
+// 递归计算tokens[p..q]表达式的值
+static uint32_t eval(int p, int q, bool *success) {
+  // 表达式无效
+  if (p > q) {
+    *success = false;
+    return 0;
+  }
+
+  // 表达式只有一个token
+  if (p == q) {
+    switch (tokens[p].type) {
+      // 数字和寄存器
+      case TK_NUM:
+        *success = true;
+        return strtoul(tokens[p].str, NULL, 10);
+      case TK_HEX:
+        *success = true;
+        return strtoul(tokens[p].str, NULL, 16);
+      case TK_REG:
+        return reg_value(tokens[p].str, success);
+      default:
+        // 其他单个token不是有效的表达式
+        *success = false;
+        return 0;
+    }
+  }
+
+  if (check_parentheses(p, q)) {
+    // 检查到被括号包围，去掉括号继续计算
+    return eval(p + 1, q - 1, success);
+  }
+
+  // 找到主运算符
+  int op = dominant_operator(p, q);
+  if (op == -1) {
+    // 没有找到主运算符，表达式无效
+    *success = false;
+    return 0;
+  }
+
+  // 处理一元运算符：解引用和负号
+  if (tokens[op].type == TK_NEG || tokens[op].type == TK_DEREF) {
+    // 计算右侧表达式的值
+    uint32_t val = eval(op + 1, q, success);
+    if (!*success) {
+      return 0;
+    }
+    // 负号
+    if (tokens[op].type == TK_NEG) {
+      return -val;
+    }
+    // 解引用
+    return vaddr_read(val, 4);
+  }
+
+  // 计算主运算符左侧表达式的值
+  uint32_t val1 = eval(p, op - 1, success);
+  if (!*success) {
+    return 0;
+  }
+
+  // 计算主运算符右侧表达式的值
+  uint32_t val2 = eval(op + 1, q, success);
+  if (!*success) {
+    return 0;
+  }
+
+  // 根据主运算符类型计算结果
+  switch (tokens[op].type) {
+    case '+': return val1 + val2;
+    case '-': return val1 - val2;
+    case '*': return val1 * val2;
+    case '/':
+      if (val2 == 0) {
+        *success = false;
+        return 0;
+      }
+      return val1 / val2;
+    case TK_EQ: return val1 == val2;
+    case TK_NEQ: return val1 != val2;
+    case TK_AND: return val1 && val2;
+    default:
+      *success = false;
+      return 0;
+  }
+}
 
 // 计算表达式e的值，成功返回结果，失败返回0
 uint32_t expr(char *e, bool *success) {
@@ -168,9 +375,11 @@ uint32_t expr(char *e, bool *success) {
     *success = false;
     return 0;
   }
-
   /* TODO: Insert codes to evaluate the expression. */
-  TODO();
+  if (nr_token == 0) {
+    *success = false;
+    return 0;
+  }
 
-  return 0;
+  return eval(0, nr_token - 1, success);
 }
