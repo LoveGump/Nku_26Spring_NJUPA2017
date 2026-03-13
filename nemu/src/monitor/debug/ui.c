@@ -170,8 +170,7 @@ static struct {
 // help ：打印所有命令的帮助信息，
 // help <command> ：打印特定命令的帮助信息
 static int cmd_help(char *args) {
-  /* extract the first argument */
-  char *arg = strtok(NULL, " ");
+  char *arg = args;
   int i;
 
   if (arg == NULL) {
