@@ -63,8 +63,12 @@ static uint8_t mbr[] = {
   0x17, 0x00, 0x2c, 0x7c, 0x00, 0x00
 };
 
+// 启动一个QEMU进程，并连接到它的GDB服务器
 void init_difftest(void) {
+  // 父进程 pid
   int ppid_before_fork = getpid();
+
+  // 进行 fork，创建一个子进程来执行 QEMU
   int pid = fork();
   if (pid == -1) {
     perror("fork");
@@ -74,6 +78,7 @@ void init_difftest(void) {
     // child
 
     // install a parent death signal in the chlid
+    // 当父进程死亡时，子进程会收到 SIGTERM 信号，从而可以及时退出，避免成为孤儿进程
     int r = prctl(PR_SET_PDEATHSIG, SIGTERM);
     if (r == -1) {
       perror("prctl error");
@@ -81,11 +86,15 @@ void init_difftest(void) {
     }
 
     if (getppid() != ppid_before_fork) {
+      // 如果父进程在 fork 后已经死亡，输出错误信息并终止程序
       panic("parent has died!");
     }
 
+    // 子进程关闭标准输入
     close(STDIN_FILENO);
+    // 执行 QEMU，使用 -S 和 -s 选项让 QEMU 在启动后暂停，并等待 GDB 连接
     execlp("qemu-system-i386", "qemu-system-i386", "-S", "-s", "-nographic", NULL);
+    // 启动失败
     perror("exec");
     panic("exec error");
   }

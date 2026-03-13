@@ -11,9 +11,11 @@ const char *regsb[] = {"al", "cl", "dl", "bl", "ah", "ch", "dh", "bh"};
 void reg_test() {
   srand(time(0));
   uint32_t sample[8];
+  // 随机生成一个eip值，并将其赋值给cpu.eip
   uint32_t eip_sample = rand();
   cpu.eip = eip_sample;
 
+  // 给每个寄存器随机生成一个值，并将其赋值给对应的寄存器
   int i;
   for (i = R_EAX; i <= R_EDI; i ++) {
     sample[i] = rand();
@@ -21,6 +23,7 @@ void reg_test() {
     assert(reg_w(i) == (sample[i] & 0xffff));
   }
 
+  // 验证8位寄存器的值是否正确
   assert(reg_b(R_AL) == (sample[R_EAX] & 0xff));
   assert(reg_b(R_AH) == ((sample[R_EAX] >> 8) & 0xff));
   assert(reg_b(R_BL) == (sample[R_EBX] & 0xff));

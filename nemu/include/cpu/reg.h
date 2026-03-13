@@ -19,7 +19,8 @@ typedef struct {
     uint32_t _32;
     uint16_t _16;
     uint8_t _8[2];
-  } gpr[8];
+  } gpr[8]; // general purpose registers 通用寄存器
+  // 也就是 eax, ecx, edx, ebx, esp, ebp, esi, edi
 
   /* Do NOT change the order of the GPRs' definitions. */
 
@@ -34,13 +35,16 @@ typedef struct {
 
 extern CPU_state cpu;
 
+// 保证通用寄存器的索引合法
 static inline int check_reg_index(int index) {
   assert(index >= 0 && index < 8);
   return index;
 }
-
+// long
 #define reg_l(index) (cpu.gpr[check_reg_index(index)]._32)
+// word
 #define reg_w(index) (cpu.gpr[check_reg_index(index)]._16)
+// byte
 #define reg_b(index) (cpu.gpr[check_reg_index(index) & 0x3]._8[index >> 2])
 
 extern const char* regsl[];
