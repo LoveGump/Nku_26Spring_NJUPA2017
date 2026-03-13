@@ -92,9 +92,12 @@ static inline void parse_args(int argc, char *argv[]) {
   int o;
   while ( (o = getopt(argc, argv, "-bl:")) != -1) {
     switch (o) {
+      // -b 批处理模式，执行完命令后直接退出
       case 'b': is_batch_mode = true; break;
+      // -l 指定日志文件路径
       case 'l': log_file = optarg; break;
       case 1:
+      // 其他参数，默认当做镜像文件路径
                 if (img_file != NULL) Log("too much argument '%s', ignored", optarg);
                 else img_file = optarg;
                 break;
