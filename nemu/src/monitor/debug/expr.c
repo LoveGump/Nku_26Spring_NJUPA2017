@@ -16,6 +16,8 @@ enum {
   TK_REG, // 寄存器
   TK_NEQ, // 不等于
   TK_AND, // 逻辑与
+  TK_OR, // 逻辑或
+  TK_NOT, // 逻辑非
   TK_DEREF, // 解引用
   TK_NEG // 负号
 
@@ -40,6 +42,8 @@ static struct rule {
   {"==", TK_EQ},                 
   {"!=", TK_NEQ},                
   {"&&", TK_AND},                
+  {"\\|\\|", TK_OR},
+  {"!", TK_NOT},
   {"0[xX][0-9a-fA-F]+", TK_HEX},  // hexadecimal number
   {"[0-9]+", TK_NUM},             // decimal number
   {"\\$[a-zA-Z][a-zA-Z0-9]*", TK_REG}  // register
@@ -230,15 +234,17 @@ static bool check_parentheses(int p, int q) {
 // 返回运算符的优先级，数字越大优先级越高
 static int precedence(int type) {
   switch (type) {
-    case TK_AND: return 1;
+    case TK_OR: return 1;
+    case TK_AND: return 2;
     case TK_EQ:
-    case TK_NEQ: return 2;
+    case TK_NEQ: return 3;
     case '+':
-    case '-': return 3;
+    case '-': return 4;
     case '*':
-    case '/': return 4;
+    case '/': return 5;
+    case TK_NOT:
     case TK_NEG:
-    case TK_DEREF: return 5;
+    case TK_DEREF: return 6;
     default: return 0;
   }
 }
@@ -322,12 +328,16 @@ static uint32_t eval(int p, int q, bool *success) {
     return 0;
   }
 
-  // 处理一元运算符：解引用和负号
-  if (tokens[op].type == TK_NEG || tokens[op].type == TK_DEREF) {
+  // 处理一元运算符：逻辑非、解引用和负号
+  if (tokens[op].type == TK_NOT || tokens[op].type == TK_NEG || tokens[op].type == TK_DEREF) {
     // 计算右侧表达式的值
     uint32_t val = eval(op + 1, q, success);
     if (!*success) {
       return 0;
+    }
+    // 逻辑非
+    if (tokens[op].type == TK_NOT) {
+      return !val;
     }
     // 负号
     if (tokens[op].type == TK_NEG) {
@@ -363,6 +373,7 @@ static uint32_t eval(int p, int q, bool *success) {
     case TK_EQ: return val1 == val2;
     case TK_NEQ: return val1 != val2;
     case TK_AND: return val1 && val2;
+    case TK_OR: return val1 || val2;
     default:
       *success = false;
       return 0;
