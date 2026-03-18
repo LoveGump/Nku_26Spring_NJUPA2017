@@ -16,6 +16,9 @@ CFLAGS   += -O2 -MMD -Wall -Werror -ggdb $(INCLUDES)
 
 # Files to be compiled
 SRCS = $(shell find src/ -name "*.c")
+CODE_FILES = $(shell find src/ include/ -type f \( -name "*.c" -o -name "*.h" \))
+COUNT_BASE ?= pa0
+COUNT_REF ?= HEAD
 OBJS = $(SRCS:src/%.c=$(OBJ_DIR)/%.o)
 
 # Compilation patterns
@@ -29,7 +32,7 @@ $(OBJ_DIR)/%.o: src/%.c
 
 # Some convinient rules
 
-.PHONY: app run submit clean
+.PHONY: app run submit clean count count-nonempty count-added
 app: $(BINARY)
 
 ARGS ?= -l $(BUILD_DIR)/nemu-log.txt
@@ -49,6 +52,17 @@ run: $(BINARY)
 gdb: $(BINARY)
 	$(call git_commit, "gdb")
 	gdb -s $(BINARY) --args $(NEMU_EXEC)
+
+
+
+count:
+	@cat $(CODE_FILES) | wc -l
+
+count-nonempty:
+	@grep -h -v '^[[:space:]]*$$' $(CODE_FILES) | wc -l
+
+count-added:
+	@git diff --numstat $(COUNT_BASE)..$(COUNT_REF) -- src include | awk '{add += $$1} END {print add + 0}'
 
 clean: 
 	rm -rf $(BUILD_DIR)
