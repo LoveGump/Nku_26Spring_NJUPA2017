@@ -2,9 +2,9 @@
 #include "all-instr.h"
 
 typedef struct {
-  DHelper decode;
-  EHelper execute;
-  int width;
+  DHelper decode;     // decode helper function
+  EHelper execute;    // execute helper function
+  int width;          // 操作数宽度，0表示默认宽度
 } opcode_entry;
 
 #define IDEXW(id, ex, w)   {concat(decode_, id), concat(exec_, ex), w}
@@ -213,7 +213,9 @@ static make_EHelper(2byte_esc) {
 }
 
 make_EHelper(real) {
+  // 获得指令的操作码
   uint32_t opcode = instr_fetch(eip, 1);
+  // 将操作码保存到全局编码信息decoding中，供指令解码阶段使用
   decoding.opcode = opcode;
   
   set_width(opcode_table[opcode].width);
@@ -229,7 +231,7 @@ void exec_wrapper(bool print_flag) {
   decoding.p = decoding.asm_buf;
   decoding.p += sprintf(decoding.p, "%8x:   ", cpu.eip);
 #endif
-
+  // 保存cpu的eip到全局编码信息decoding中，供指令解码阶段使用
   decoding.seq_eip = cpu.eip;
   exec_real(&decoding.seq_eip);
 

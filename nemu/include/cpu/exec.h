@@ -9,8 +9,10 @@ typedef void (*EHelper) (vaddr_t *);
 #include "cpu/decode.h"
 
 static inline uint32_t instr_fetch(vaddr_t *eip, int len) {
+  // 从内存中读取指令，长度为len字节，返回指令的值
   uint32_t instr = vaddr_read(*eip, len);
 #ifdef DEBUG
+  // 打印指令的字节流，供调试使用
   uint8_t *p_instr = (void *)&instr;
   int i;
   for (i = 0; i < len; i ++) {
