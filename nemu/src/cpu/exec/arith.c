@@ -1,14 +1,5 @@
 #include "cpu/exec.h"
 
-static inline int64_t sext_by_width(uint32_t x, int width) {
-  switch (width) {
-    case 1: return (int8_t)x;
-    case 2: return (int16_t)x;
-    case 4: return (int32_t)x;
-    default: assert(0);
-  }
-}
-
 make_EHelper(add) {
   // 先获取mask
   uint32_t mask = rtl_width_mask(id_dest->width); 
@@ -125,70 +116,67 @@ make_EHelper(neg) {
 
 // adc 是带进位的加法，即 dest + src + CF
 make_EHelper(adc) {
-  uint32_t mask = rtl_width_mask(id_dest->width);
-  uint32_t bits = id_dest->width * 8;
-  uint32_t dest = id_dest->val & mask;
-  uint32_t src = id_src->val & mask;
+  rtl_add(&t2, &id_dest->val, &id_src->val);
+  rtl_sltu(&t3, &t2, &id_dest->val); // 检查第一次加法是否溢出 (dest + src)
 
   rtl_get_CF(&t1);
-  uint32_t cf = t1 & 0x1;
+  rtl_add(&t0, &t2, &t1);           // t0 = dest + src + CF_old
+  
+  // 检查第二次加法是否溢出 ( (dest + src) + CF_old )
+  // 只有当 t2 为全 1 且 t1 为 1 时，这一步才会产生进位
+  rtl_sltu(&t1, &t0, &t2); 
+  
+  rtl_or(&t1, &t3, &t1);            // 合并两次进位情况
+  rtl_set_CF(&t1);
 
-  uint64_t addend = (uint64_t)src + (uint64_t)cf;
-  uint64_t sum = (uint64_t)dest + addend;
-  t2 = (dest + addend) & mask;
-  operand_write(id_dest, &t2);
-  rtl_update_ZFSF(&t2, id_dest->width);
+  // 更新结果
+  operand_write(id_dest, &t0);
+  rtl_update_ZFSF(&t0, id_dest->width);
 
-  t0 = (sum >> bits) & 0x1;
-  rtl_set_CF(&t0);
-
-  int64_t sdest = sext_by_width(dest, id_dest->width);
-  int64_t ssrc = sext_by_width(src, id_dest->width);
-  int64_t sres = sdest + ssrc + (int64_t)cf;
-  int64_t smin = -(1ll << (bits - 1));
-  int64_t smax =  (1ll << (bits - 1)) - 1;
-  t0 = (sres < smin || sres > smax);
-  rtl_set_OF(&t0);
+  // OF 标志计算 (保持原样基本正确，但建议使用最终结果 t0 比较)
+  rtl_xor(&t1, &id_dest->val, &id_src->val);
+  rtl_not(&t1);
+  rtl_xor(&t3, &id_dest->val, &t0);
+  rtl_and(&t1, &t1, &t3);
+  rtl_msb(&t1, &t1, id_dest->width);
+  rtl_set_OF(&t1);
 
   print_asm_template2(adc);
 }
 
 // sbb 是带借位的减法，即 dest - src - CF
 make_EHelper(sbb) {
-  // old_cf = CF
-  rtl_get_CF(&t1);
+  // 1. 获取旧的 CF
+  rtl_get_CF(&t1); // t1 = CF_old
 
-  // result = dest - src - old_cf
-  rtl_sub(&t2, &id_dest->val, &id_src->val);  // tmp = dest - src
-  rtl_sub(&t2, &t2, &t1);                      // result = tmp - old_cf
+  // 2. 第一步减法: dest - src
+  rtl_sub(&t2, &id_dest->val, &id_src->val);
+  // 判定第一步是否借位: dest < src
+  rtl_sltu(&t3, &id_dest->val, &id_src->val);
 
-  // CF (borrow):
-  // borrow1 = (dest < src)
-  rtl_sltu(&t0, &id_dest->val, &id_src->val);
+  // 3. 第二步减法: (dest - src) - CF_old
+  rtl_sub(&t0, &t2, &t1);
+  // 判定第二步是否借位: (dest - src) < CF_old
+  rtl_sltu(&t1, &t2, &t1);
 
-  // tmp = dest - src
-  rtl_sub(&t3, &id_dest->val, &id_src->val);
+  // 4. 合并并设置 CF
+  rtl_or(&t1, &t3, &t1);
+  rtl_set_CF(&t1);
 
-  // borrow2 = (tmp < old_cf)
-  rtl_sltu(&t1, &t3, &t1);
+  // 5. 更新 ZF, SF 并写回结果
+  operand_write(id_dest, &t0);
+  rtl_update_ZFSF(&t0, id_dest->width);
 
-  // CF = borrow1 | borrow2
-  rtl_or(&t0, &t0, &t1);
-  rtl_set_CF(&t0);
-
-  // OF
-  rtl_xor(&t0, &id_dest->val, &id_src->val);
-  rtl_xor(&t1, &id_dest->val, &t2);
-  rtl_and(&t0, &t0, &t1);
-  rtl_msb(&t0, &t0, id_dest->width);
-  rtl_set_OF(&t0);
-
-  rtl_update_ZFSF(&t2, id_dest->width);
-  operand_write(id_dest, &t2);
+  // 6. 计算 OF (减法溢出)
+  // 符号不同 (dest ^ src) 且 结果符号改变 (dest ^ res)
+  rtl_xor(&t1, &id_dest->val, &id_src->val);
+  rtl_xor(&t3, &id_dest->val, &t0);
+  rtl_and(&t1, &t1, &t3);
+  rtl_msb(&t1, &t1, id_dest->width);
+  rtl_set_OF(&t1);
 
   print_asm_template2(sbb);
 }
-
 
 // mul 和 imul 的实现比较复杂，因为它们需要处理乘法结果的高位和低位，以及符号扩展等问题
 make_EHelper(mul) {
