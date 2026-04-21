@@ -232,6 +232,7 @@ make_EHelper(real) {
   idex(eip, &opcode_table[opcode]);
 }
 
+// 更新 eip 如果是 jmp 指令则更新为 jmp_eip 否则更新为 seq_eip
 static inline void update_eip(void) {
   cpu.eip = (decoding.is_jmp ? (decoding.is_jmp = 0, decoding.jmp_eip) : decoding.seq_eip);
 }
@@ -245,7 +246,6 @@ void exec_wrapper(bool print_flag) {
   decoding.seq_eip = cpu.eip;
   // 将地址作为参数传入 exec_real()
   exec_real(&decoding.seq_eip);
-  // 执行完指令后，decoding.seq_eip已经被更新为下一条指令的地址
 
 #ifdef DEBUG
   int instr_len = decoding.seq_eip - cpu.eip;
@@ -260,7 +260,7 @@ void exec_wrapper(bool print_flag) {
 #ifdef DIFF_TEST
   uint32_t eip = cpu.eip;
 #endif
-
+  // 更新 eip 的值
   update_eip();
 
 #ifdef DIFF_TEST
