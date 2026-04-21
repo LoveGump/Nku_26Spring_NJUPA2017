@@ -51,6 +51,7 @@ static inline int load_default_img() {
   return sizeof(img);
 }
 
+// 加载镜像
 static inline void load_img() {
   long size;
   if (img_file == NULL) {
@@ -118,6 +119,7 @@ int init_monitor(int argc, char *argv[]) {
   init_log();
 
   /* Test the implementation of the `CPU_state' structure. */
+  // 测试 CPU_state 结构体的实现，确保寄存器的值能够正确地存储和访问
   reg_test();
 
 #ifdef DIFF_TEST

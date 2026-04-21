@@ -19,6 +19,7 @@ void isa_reg_display(void) {
 }
 
 void reg_test() {
+  // 使用随机数生成器来生成寄存器的值，并进行验证
   srand(time(0));
   uint32_t sample[8];
   // 随机生成一个eip值，并将其赋值给cpu.eip

@@ -3,6 +3,7 @@ void ui_mainloop(int);
 
 int main(int argc, char *argv[]) {
   /* Initialize the monitor. */
+  // 初始化镜像
   int is_batch_mode = init_monitor(argc, argv);
 
   /* Receive commands from user. */
