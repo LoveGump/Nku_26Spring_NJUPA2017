@@ -77,15 +77,20 @@ make_EHelper(sar) {
 }
 
 make_EHelper(shl) {
-  // 按照 x86 规范，移位次数需与 0x1f 相与（只取低 5 位）
   rtl_andi(&t1, &id_src->val, 0x1f);
-  
-  rtl_shl(&t2, &id_dest->val, &t1);
-  operand_write(id_dest, &t2);
-
-  // fixed
-  // 只有当移位次数不为 0 时，才更新 ZF 和 SF
   if (t1 != 0) {
+    // 1. 更新 CF：获取最后一次被移出的最高位
+    // 逻辑：将原数据右移 (宽度 - 移位次数) 位，最低位即为 CF
+    // 例如 32 位下移位 3 次，被移出的是原数据的第 29 位 (32 - 3)
+    rtl_shli(&t0, &id_dest->val, t1 - 1);
+    rtl_msb(&t0, &t0, id_dest->width); // 获取最高位
+    rtl_set_CF(&t0);
+
+    // 2. 执行移位并写回
+    rtl_shl(&t2, &id_dest->val, &t1);
+    operand_write(id_dest, &t2);
+
+    // 3. 更新 ZF/SF
     rtl_update_ZFSF(&t2, id_dest->width);
   }
 
@@ -94,12 +99,26 @@ make_EHelper(shl) {
 
 make_EHelper(shr) {
   rtl_andi(&t1, &id_src->val, 0x1f);
-  rtl_shr(&t2, &id_dest->val, &t1);
-  operand_write(id_dest, &t2);
-
-  // fixed
+  
   if (t1 != 0) {
+    // --- 更新 CF ---
+    // 被移出的最后一位是原数据的第 (t1 - 1) 位
+    // 逻辑：(dest >> (t1 - 1)) & 1
+    rtl_subi(&t0, &t1, 1);
+    rtl_shr(&t0, &id_dest->val, &t0);
+    rtl_andi(&t0, &t0, 1);
+    rtl_set_CF(&t0);
+
+    // --- 执行移位 ---
+    rtl_shr(&t2, &id_dest->val, &t1);
+    operand_write(id_dest, &t2);
+
+    // --- 更新 ZF/SF ---
     rtl_update_ZFSF(&t2, id_dest->width);
+  } else {
+    // count 为 0 时，根据手册不更新任何标志位
+    // 但为了安全，我们仍然写回数据（虽然没变）
+    operand_write(id_dest, &id_dest->val);
   }
 
   print_asm_template2(shr);
