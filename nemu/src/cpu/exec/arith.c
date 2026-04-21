@@ -236,6 +236,11 @@ make_EHelper(imul2) {
   operand_write(id_dest, &t1);
 
   rtl_update_ZFSF(&t1, id_dest->width);
+  // 【fixed】手动清除被污染的 CF 和 OF
+  // rtl_imul 内部的运算可能污染了标志位
+  t0 = 0;
+  rtl_set_CF(&t0);
+  rtl_set_OF(&t0);
 
   print_asm_template2(imul);
 }
@@ -250,6 +255,9 @@ make_EHelper(imul3) {
   operand_write(id_dest, &t1);
 
   rtl_update_ZFSF(&t1, id_dest->width);
+  t0 = 0;
+  rtl_set_CF(&t0);
+  rtl_set_OF(&t0);
   print_asm_template3(imul);
 }
 
