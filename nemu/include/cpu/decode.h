@@ -69,6 +69,7 @@ void operand_write(Operand *, rtlreg_t *);
 /* shared by all helper functions */
 extern DecodeInfo decoding;
 
+// id_src、id_dest、id_src2 全局编码信息 decoding 中的 src、dest、src2 
 #define id_src (&decoding.src)
 #define id_src2 (&decoding.src2)
 #define id_dest (&decoding.dest)

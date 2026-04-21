@@ -3,8 +3,12 @@
 
 /* shared by all helper functions */
 DecodeInfo decoding;
-rtlreg_t t0, t1, t2, t3; // 临时寄寄存器
-const rtlreg_t tzero = 0; // 0 寄存器
+
+// 临时寄寄存器
+rtlreg_t t0, t1, t2, t3; 
+
+// 0 寄存器 只能读 不能写
+const rtlreg_t tzero = 0; 
 
 // 参数分别为 eip 操作数 是否加载操作数的值
 #define make_DopHelper(name) void concat(decode_op_, name) (vaddr_t *eip, Operand *op, bool load_val)

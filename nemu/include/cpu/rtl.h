@@ -3,10 +3,12 @@
 
 #include "nemu.h"
 
+// RTL 寄存器
 extern rtlreg_t t0, t1, t2, t3;
 extern const rtlreg_t tzero;
 
 /* RTL basic instructions */
+// RTL基本指令：只使用一条机器指令来实现相应的功能
 
 // 将立即数 imm 加载到寄存器 dest 中
 static inline void rtl_li(rtlreg_t* dest, uint32_t imm) {
@@ -32,7 +34,7 @@ static inline void rtl_li(rtlreg_t* dest, uint32_t imm) {
     *dest = concat(c_, name) (*src1, imm); \
   }
 
-
+// 算术逻辑运算 包括寄存器类型和立即数类型
 make_rtl_arith_logic(add)
 make_rtl_arith_logic(sub)
 make_rtl_arith_logic(and)
@@ -44,6 +46,7 @@ make_rtl_arith_logic(sar)
 make_rtl_arith_logic(slt)
 make_rtl_arith_logic(sltu)
 
+// 
 static inline void rtl_mul(rtlreg_t* dest_hi, rtlreg_t* dest_lo, const rtlreg_t* src1, const rtlreg_t* src2) {
   asm volatile("mul %3" : "=d"(*dest_hi), "=a"(*dest_lo) : "a"(*src1), "r"(*src2));
 }
@@ -60,6 +63,7 @@ static inline void rtl_idiv(rtlreg_t* q, rtlreg_t* r, const rtlreg_t* src1_hi, c
   asm volatile("idiv %4" : "=a"(*q), "=d"(*r) : "d"(*src1_hi), "a"(*src1_lo), "r"(*src2));
 }
 
+// 内存访问指令
 static inline void rtl_lm(rtlreg_t *dest, const rtlreg_t* addr, int len) {
   *dest = vaddr_read(*addr, len);
 }
@@ -68,6 +72,7 @@ static inline void rtl_sm(rtlreg_t* addr, int len, const rtlreg_t* src1) {
   vaddr_write(*addr, len, *src1);
 }
 
+// 通用寄存器访问指令
 static inline void rtl_lr_b(rtlreg_t* dest, int r) {
   *dest = reg_b(r);
 }
@@ -93,9 +98,9 @@ static inline void rtl_sr_l(int r, const rtlreg_t* src1) {
 }
 
 /* RTL psuedo instructions */
+// RTL 伪指令：是通过 RTL 基本指令或者已经实现的 RTL 伪指令来实现的
 
-// 将 src1 的值复制到 dest 中
-// （RTL） 加载寄存器
+// 带宽度的寄存器访问指令
 static inline void rtl_lr(rtlreg_t* dest, int r, int width) {
   switch (width) {
     case 4: rtl_lr_l(dest, r); return;
@@ -114,6 +119,7 @@ static inline void rtl_sr(int r, int width, const rtlreg_t* src1) {
   }
 }
 
+// EFLAGS 标志位的读写
 #define make_rtl_setget_eflags(f) \
   static inline void concat(rtl_set_, f) (const rtlreg_t* src) { \
     TODO(); \
