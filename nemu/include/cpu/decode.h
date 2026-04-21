@@ -41,25 +41,25 @@ typedef struct {
 
 typedef union {
   struct {
-    uint8_t R_M		:3;
-    uint8_t reg		:3;
-    uint8_t mod		:2;
+    uint8_t R_M		:3; // r/m 字段编码的寄存器编号或内存寻址方式
+    uint8_t reg		:3; // reg 字段编码的寄存器编号
+    uint8_t mod		:2; // mod 字段编码的寻址方式
   };
   struct {
-    uint8_t dont_care	:3;
-    uint8_t opcode		:3;
+    uint8_t dont_care	:3;// 低 3 位不关心
+    uint8_t opcode		:3;// 扩展操作码：当 opcode 字段为 0 时，表示指令的真正操作码在后续字节中
   };
-  uint8_t val;
+  uint8_t val; // 对应的8位值
 } ModR_M; // modR/M 字节的格式
 
 typedef union {
   struct {
-    uint8_t base	:3;
-    uint8_t index	:3;
-    uint8_t ss		:2;
+    uint8_t base	:3; // base 字段编码的基址寄存器编号
+    uint8_t index	:3; // index 字段编码的变址寄存器编号
+    uint8_t ss		:2; // ss 字段编码的比例因子，00 01 10 分别表示 1、2、4
   };
   uint8_t val;
-} SIB;
+} SIB;// SIB(Scale - Index - Base) 字节的格式 有效地址为 base + index * (1 << ss) + disp
 
 void load_addr(vaddr_t *, ModR_M *, Operand *);
 void read_ModR_M(vaddr_t *, Operand *, bool, Operand *, bool);

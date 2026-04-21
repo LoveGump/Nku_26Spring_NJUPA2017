@@ -126,6 +126,7 @@ static inline void decode_op_rm(vaddr_t *eip, Operand *rm, bool load_rm_val, Ope
 }
 
 /* Ob, Ov */
+// O 表示操作数的地址在指令的后续字节中，b/v 分别表示操作数的宽度为 1/4 字节
 static inline make_DopHelper(O) {
   op->type = OP_TYPE_MEM;
   op->addr = instr_fetch(eip, 4);
@@ -141,10 +142,12 @@ static inline make_DopHelper(O) {
 /* Eb <- Gb
  * Ev <- Gv
  */
+ // G 2 E 表示 G 字段编码的寄存器操作数到 E 字段编码的寄存器或内存操作数
 make_DHelper(G2E) {
   decode_op_rm(eip, id_dest, true, id_src, true);
 }
 
+// mov_G 2 E 表示将 G 字段编码的寄存器操作数的值加载到 E 字段编码的寄存器或内存操作数中
 make_DHelper(mov_G2E) {
   decode_op_rm(eip, id_dest, false, id_src, true);
 }
@@ -336,8 +339,15 @@ make_DHelper(out_a2dx) {
 #endif
 }
 
+// 设置操作数的宽度
 void operand_write(Operand *op, rtlreg_t* src) {
-  if (op->type == OP_TYPE_REG) { rtl_sr(op->reg, op->width, src); }
-  else if (op->type == OP_TYPE_MEM) { rtl_sm(&op->addr, op->width, src); }
+  if (op->type == OP_TYPE_REG) { 
+    // 如果操作数类型是寄存器，则将 src 的值写入到 op->reg 寄存器中，宽度为 op->width
+    rtl_sr(op->reg, op->width, src); 
+  }
+  else if (op->type == OP_TYPE_MEM) { 
+    // 如果操作数类型是内存，则将 src 的值写入到 op->addr 指向的内存位置，宽度为 op->width
+    rtl_sm(&op->addr, op->width, src); 
+  }
   else { assert(0); }
 }
