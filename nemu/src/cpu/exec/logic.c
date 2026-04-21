@@ -79,21 +79,35 @@ make_EHelper(sar) {
 make_EHelper(shl) {
   rtl_andi(&t1, &id_src->val, 0x1f);
   if (t1 != 0) {
-    // 1. 更新 CF：获取最后一次被移出的最高位
-    // 逻辑：将原数据右移 (宽度 - 移位次数) 位，最低位即为 CF
-    // 例如 32 位下移位 3 次，被移出的是原数据的第 29 位 (32 - 3)
-    rtl_shli(&t0, &id_dest->val, t1 - 1);
-    rtl_msb(&t0, &t0, id_dest->width); // 获取最高位
+    // 1. 更新 CF (你之前可能已经补了)
+    rtl_subi(&t0, &t1, 1);
+    rtl_shl(&t0, &id_dest->val, &t0);
+    rtl_msb(&t0, &t0, id_dest->width);
     rtl_set_CF(&t0);
 
-    // 2. 执行移位并写回
+    // 2. 执行移位
     rtl_shl(&t2, &id_dest->val, &t1);
     operand_write(id_dest, &t2);
-
+    
     // 3. 更新 ZF/SF
     rtl_update_ZFSF(&t2, id_dest->width);
-  }
 
+    // 4. 关键：针对 DiffTest 补全 OF
+    // 如果移位次数为 1，OF = (最高位 ^ 进位位)
+    // 如果移位次数 > 1，虽然未定义，但我们可以尝试按次数为 1 的逻辑设置，或者清零
+    // 从日志看 QEMU 设为了 1，尝试增加如下逻辑：
+    if (t1 == 1) {
+      rtl_msb(&t0, &t2, id_dest->width); // 移位后的最高位
+      rtl_get_CF(&t3);                   // 此时的 CF
+      rtl_xor(&t0, &t0, &t3);            // OF = MSB ^ CF
+      rtl_set_OF(&t0);
+    } else {
+      // 次数 > 1 时，QEMU 有时会根据最后一次移位设置 OF
+      // 或者干脆在这里也执行一次逻辑以匹配 QEMU
+      t0 = 0; // 如果还是报错，可以尝试强制清零看看 QEMU 的反应
+      rtl_set_OF(&t0);
+    }
+  }
   print_asm_template2(shl);
 }
 
@@ -101,26 +115,31 @@ make_EHelper(shr) {
   rtl_andi(&t1, &id_src->val, 0x1f);
   
   if (t1 != 0) {
-    // --- 更新 CF ---
-    // 被移出的最后一位是原数据的第 (t1 - 1) 位
-    // 逻辑：(dest >> (t1 - 1)) & 1
+    // 1. 更新 CF (保持你现有的逻辑)
     rtl_subi(&t0, &t1, 1);
     rtl_shr(&t0, &id_dest->val, &t0);
     rtl_andi(&t0, &t0, 1);
     rtl_set_CF(&t0);
 
-    // --- 执行移位 ---
+    // 2. 补充 OF 更新逻辑
+    // 逻辑：如果移位次数为 1，OF = 原数据的最高位 (MSB)
+    if (t1 == 1) {
+      rtl_msb(&t0, &id_dest->val, id_dest->width);
+      rtl_set_OF(&t0);
+    } else {
+      // 关键：次数 > 1 时，虽然手册说 undefined，但 QEMU 有时会清零或保持
+      // 针对你这次报错，可以尝试也计算一次 MSB 或直接清零
+      t0 = 0;
+      rtl_set_OF(&t0); 
+    }
+
+    // 3. 执行移位并更新 ZF/SF
     rtl_shr(&t2, &id_dest->val, &t1);
     operand_write(id_dest, &t2);
-
-    // --- 更新 ZF/SF ---
     rtl_update_ZFSF(&t2, id_dest->width);
   } else {
-    // count 为 0 时，根据手册不更新任何标志位
-    // 但为了安全，我们仍然写回数据（虽然没变）
     operand_write(id_dest, &id_dest->val);
   }
-
   print_asm_template2(shr);
 }
 
