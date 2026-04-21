@@ -69,10 +69,12 @@ static inline make_DopHelper(SI) {
  * It is convenient to merge them into a single helper function.
  */
 /* AL/eAX */
+// a 对应的是 AL 或 eAX 寄存器，取决于当前的操作数宽度
 static inline make_DopHelper(a) {
-  op->type = OP_TYPE_REG;
-  op->reg = R_EAX;
+  op->type = OP_TYPE_REG; // 设置寄存器类型
+  op->reg = R_EAX;        // 寄存器编号为 R_EAX
   if (load_val) {
+    // 根据操作数宽度，从 R_EAX 寄存器中加载对应的值到 op->val 中
     rtl_lr(&op->val, R_EAX, op->width);
   }
 
@@ -85,10 +87,12 @@ static inline make_DopHelper(a) {
 /* XX: AL, AH, BL, BH, CL, CH, DL, DH
  * eXX: eAX, eCX, eDX, eBX, eSP, eBP, eSI, eDI
  */
+// 解码 寄存器编号编码在操作码中的指令
 static inline make_DopHelper(r) {
   op->type = OP_TYPE_REG;
-  op->reg = decoding.opcode & 0x7;
+  op->reg = decoding.opcode & 0x7;  // 寄存器编号在操作码的低 3 位
   if (load_val) {
+    // 加载 对应的 寄存器值到 op->val 中
     rtl_lr(&op->val, op->reg, op->width);
   }
 
@@ -100,13 +104,23 @@ static inline make_DopHelper(r) {
 /* I386 manual does not contain this abbreviation.
  * We decode everything of modR/M byte by one time.
  */
-/* Eb, Ew, Ev
- * Gb, Gv
- * Cd,
- * M
- * Rd
- * Sw
+/* Eb, Ew, Ev E：可能是寄存器，也可能是内存地址，b/w/v 分别表示操作数的宽度为 1/2/4 字节
+ * Gb, Gv     G：寄存器，b/v 分别表示操作数的宽度为 1/4 字节
+ * Cd,        C：控制寄存器
+ * M          M：内存地址
+ * Rd         R：调试寄存器
+ * Sw         S：段寄存器 
  */
+ // ModR/M 是 Mode Register/Memory
+ // ModR/M 字节的格式如下：
+  // | mod [7,6]  | Reg/Opcode [5,4,3]  | r/m [2,1,0]  |
+  // mod 字段表示寻址方式，11 表示寄存器寻址， 00 01 10分别是无位移、8 位位移、32 位位移的内存寻址
+  // reg/opcode 字段表示寄存器编号或扩展操作码，对应了 x86 的 8 个通用寄存器
+  // r/m 字段表示寄存器编号或内存地址 和mod一起看
+ // 解码 modR/M 字节编码的指令
+ // eip 指向 modR/M 字节
+ // rm 是 modR/M 字节中 r/m 字段编码的操作数
+ // reg 是 modR/M 字节中 reg 字段编码的操作数
 static inline void decode_op_rm(vaddr_t *eip, Operand *rm, bool load_rm_val, Operand *reg, bool load_reg_val) {
   read_ModR_M(eip, rm, load_rm_val, reg, load_reg_val);
 }

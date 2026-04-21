@@ -94,6 +94,8 @@ static inline void rtl_sr_l(int r, const rtlreg_t* src1) {
 
 /* RTL psuedo instructions */
 
+// 将 src1 的值复制到 dest 中
+// （RTL） 加载寄存器
 static inline void rtl_lr(rtlreg_t* dest, int r, int width) {
   switch (width) {
     case 4: rtl_lr_l(dest, r); return;

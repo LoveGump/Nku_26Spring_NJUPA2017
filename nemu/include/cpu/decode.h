@@ -50,7 +50,7 @@ typedef union {
     uint8_t opcode		:3;
   };
   uint8_t val;
-} ModR_M;
+} ModR_M; // modR/M 字节的格式
 
 typedef union {
   struct {
