@@ -1,41 +1,134 @@
 #include "cpu/exec.h"
 
+// 根据操作数的宽度，计算出对应的掩码，用于截断结果
+// 1：0xff 2：0xffff 4：0xffffffff
+static inline uint32_t mask_by_width(int width) {
+  assert(width == 1 || width == 2 || width == 4);
+  return width == 4 ? 0xffffffffu : ((1u << (width * 8)) - 1);
+}
+
+// 获取符号位的掩码
+// 1：0x80 2：0x8000 4：0x80000000
+static inline uint32_t sign_bit(int width) {
+  assert(width == 1 || width == 2 || width == 4);
+  return 1u << (width * 8 - 1);
+}
+
 make_EHelper(add) {
-  TODO();
+  // 先获取mask
+  uint32_t mask = mask_by_width(id_dest->width); 
+  uint32_t dest = id_dest->val & mask;  // dest
+  uint32_t src = id_src->val & mask;      // src
+  uint64_t sum = (uint64_t)dest + (uint64_t)src; // 计算结果，使用64位来避免溢出
+
+  t2 = sum & mask; // 截断结果到操作数的宽度
+  // 将结果写回目的操作数
+  operand_write(id_dest, &t2); 
+  // 更新零标志位和符号标志位
+  rtl_update_ZFSF(&t2, id_dest->width); 
+
+  // 计算进位标志位，只有当结果超过了操作数的最大值时才会产生进位
+  t0 = (sum >> (id_dest->width * 8)) & 0x1;
+  rtl_set_CF(&t0);
+
+  // 计算溢出标志位，只有当两个操作数符号相同但结果符号不同的时候才会产生溢出
+  t0 = ((~(dest ^ src)) & (dest ^ t2) & sign_bit(id_dest->width)) ? 1 : 0;
+  rtl_set_OF(&t0);
 
   print_asm_template2(add);
 }
 
+// sub 的实现和 add 类似，只不过是计算 dest - src 而不是 dest + src
 make_EHelper(sub) {
-  TODO();
+  uint32_t mask = mask_by_width(id_dest->width);
+  uint32_t dest = id_dest->val & mask;
+  uint32_t src = id_src->val & mask;
+
+  t2 = (dest - src) & mask;
+  operand_write(id_dest, &t2);
+  rtl_update_ZFSF(&t2, id_dest->width);
+
+  t0 = dest < src;
+  rtl_set_CF(&t0);
+
+  t0 = (((dest ^ src) & (dest ^ t2) & sign_bit(id_dest->width)) != 0);
+  rtl_set_OF(&t0);
 
   print_asm_template2(sub);
 }
 
+// cmp 的实现和 sub 类似，只不过不需要写回结果到目的操作数
 make_EHelper(cmp) {
-  TODO();
+  uint32_t mask = mask_by_width(id_dest->width);
+  uint32_t dest = id_dest->val & mask;
+  uint32_t src = id_src->val & mask;
+
+  t2 = (dest - src) & mask;
+  rtl_update_ZFSF(&t2, id_dest->width);
+
+  t0 = dest < src;
+  rtl_set_CF(&t0);
+
+  t0 = (((dest ^ src) & (dest ^ t2) & sign_bit(id_dest->width)) != 0);
+  rtl_set_OF(&t0);
 
   print_asm_template2(cmp);
 }
 
+// inc 是 自增1
 make_EHelper(inc) {
-  TODO();
+  uint32_t mask = mask_by_width(id_dest->width);
+  uint32_t dest = id_dest->val & mask;
+
+  rtl_get_CF(&t3);
+
+  t2 = (dest + 1) & mask;
+  operand_write(id_dest, &t2);
+  rtl_update_ZFSF(&t2, id_dest->width);
+
+  t0 = (((~dest) & t2 & sign_bit(id_dest->width)) != 0);
+  rtl_set_OF(&t0);
+  rtl_set_CF(&t3);
 
   print_asm_template1(inc);
 }
 
 make_EHelper(dec) {
-  TODO();
+  uint32_t mask = mask_by_width(id_dest->width);
+  uint32_t dest = id_dest->val & mask;
+
+  rtl_get_CF(&t3);
+
+  t2 = (dest - 1) & mask;
+  operand_write(id_dest, &t2);
+  rtl_update_ZFSF(&t2, id_dest->width);
+
+  t0 = ((dest & (~t2) & sign_bit(id_dest->width)) != 0);
+  rtl_set_OF(&t0);
+  rtl_set_CF(&t3);
 
   print_asm_template1(dec);
 }
 
+// neg 是取反加一，即 -dest = ~dest + 1
 make_EHelper(neg) {
-  TODO();
+  uint32_t mask = mask_by_width(id_dest->width);
+  uint32_t dest = id_dest->val & mask;
+
+  t2 = ((~dest) + 1) & mask;
+  operand_write(id_dest, &t2);
+  rtl_update_ZFSF(&t2, id_dest->width);
+
+  t0 = (dest != 0);
+  rtl_set_CF(&t0);
+
+  t0 = (dest == sign_bit(id_dest->width));
+  rtl_set_OF(&t0);
 
   print_asm_template1(neg);
 }
 
+// adc 是带进位的加法，即 dest + src + CF
 make_EHelper(adc) {
   rtl_add(&t2, &id_dest->val, &id_src->val);
   rtl_sltu(&t3, &t2, &id_dest->val);
@@ -59,6 +152,7 @@ make_EHelper(adc) {
   print_asm_template2(adc);
 }
 
+// sbb 是带借位的减法，即 dest - src - CF
 make_EHelper(sbb) {
   rtl_sub(&t2, &id_dest->val, &id_src->val);
   rtl_sltu(&t3, &id_dest->val, &t2);
@@ -81,6 +175,7 @@ make_EHelper(sbb) {
   print_asm_template2(sbb);
 }
 
+// mul 和 imul 的实现比较复杂，因为它们需要处理乘法结果的高位和低位，以及符号扩展等问题
 make_EHelper(mul) {
   rtl_lr(&t0, R_EAX, id_dest->width);
   rtl_mul(&t0, &t1, &id_dest->val, &t0);
