@@ -1,22 +1,8 @@
 #include "cpu/exec.h"
 
-// 根据操作数的宽度，计算出对应的掩码，用于截断结果
-// 1：0xff 2：0xffff 4：0xffffffff
-static inline uint32_t mask_by_width(int width) {
-  assert(width == 1 || width == 2 || width == 4);
-  return width == 4 ? 0xffffffffu : ((1u << (width * 8)) - 1);
-}
-
-// 获取符号位的掩码
-// 1：0x80 2：0x8000 4：0x80000000
-static inline uint32_t sign_bit(int width) {
-  assert(width == 1 || width == 2 || width == 4);
-  return 1u << (width * 8 - 1);
-}
-
 make_EHelper(add) {
   // 先获取mask
-  uint32_t mask = mask_by_width(id_dest->width); 
+  uint32_t mask = rtl_width_mask(id_dest->width); 
   uint32_t dest = id_dest->val & mask;  // dest
   uint32_t src = id_src->val & mask;      // src
   uint64_t sum = (uint64_t)dest + (uint64_t)src; // 计算结果，使用64位来避免溢出
@@ -32,7 +18,7 @@ make_EHelper(add) {
   rtl_set_CF(&t0);
 
   // 计算溢出标志位，只有当两个操作数符号相同但结果符号不同的时候才会产生溢出
-  t0 = ((~(dest ^ src)) & (dest ^ t2) & sign_bit(id_dest->width)) ? 1 : 0;
+  t0 = ((~(dest ^ src)) & (dest ^ t2) & rtl_sign_mask(id_dest->width)) ? 1 : 0;
   rtl_set_OF(&t0);
 
   print_asm_template2(add);
@@ -40,7 +26,7 @@ make_EHelper(add) {
 
 // sub 的实现和 add 类似，只不过是计算 dest - src 而不是 dest + src
 make_EHelper(sub) {
-  uint32_t mask = mask_by_width(id_dest->width);
+  uint32_t mask = rtl_width_mask(id_dest->width);
   uint32_t dest = id_dest->val & mask;
   uint32_t src = id_src->val & mask;
 
@@ -51,7 +37,7 @@ make_EHelper(sub) {
   t0 = dest < src;
   rtl_set_CF(&t0);
 
-  t0 = (((dest ^ src) & (dest ^ t2) & sign_bit(id_dest->width)) != 0);
+  t0 = (((dest ^ src) & (dest ^ t2) & rtl_sign_mask(id_dest->width)) != 0);
   rtl_set_OF(&t0);
 
   print_asm_template2(sub);
@@ -59,7 +45,7 @@ make_EHelper(sub) {
 
 // cmp 的实现和 sub 类似，只不过不需要写回结果到目的操作数
 make_EHelper(cmp) {
-  uint32_t mask = mask_by_width(id_dest->width);
+  uint32_t mask = rtl_width_mask(id_dest->width);
   uint32_t dest = id_dest->val & mask;
   uint32_t src = id_src->val & mask;
 
@@ -69,7 +55,7 @@ make_EHelper(cmp) {
   t0 = dest < src;
   rtl_set_CF(&t0);
 
-  t0 = (((dest ^ src) & (dest ^ t2) & sign_bit(id_dest->width)) != 0);
+  t0 = (((dest ^ src) & (dest ^ t2) & rtl_sign_mask(id_dest->width)) != 0);
   rtl_set_OF(&t0);
 
   print_asm_template2(cmp);
@@ -77,7 +63,7 @@ make_EHelper(cmp) {
 
 // inc 是 自增1
 make_EHelper(inc) {
-  uint32_t mask = mask_by_width(id_dest->width);
+  uint32_t mask = rtl_width_mask(id_dest->width);
   uint32_t dest = id_dest->val & mask;
 
   rtl_get_CF(&t3);
@@ -86,7 +72,7 @@ make_EHelper(inc) {
   operand_write(id_dest, &t2);
   rtl_update_ZFSF(&t2, id_dest->width);
 
-  t0 = (((~dest) & t2 & sign_bit(id_dest->width)) != 0);
+  t0 = (((~dest) & t2 & rtl_sign_mask(id_dest->width)) != 0);
   rtl_set_OF(&t0);
   rtl_set_CF(&t3);
 
@@ -94,7 +80,7 @@ make_EHelper(inc) {
 }
 
 make_EHelper(dec) {
-  uint32_t mask = mask_by_width(id_dest->width);
+  uint32_t mask = rtl_width_mask(id_dest->width);
   uint32_t dest = id_dest->val & mask;
 
   rtl_get_CF(&t3);
@@ -103,7 +89,7 @@ make_EHelper(dec) {
   operand_write(id_dest, &t2);
   rtl_update_ZFSF(&t2, id_dest->width);
 
-  t0 = ((dest & (~t2) & sign_bit(id_dest->width)) != 0);
+  t0 = ((dest & (~t2) & rtl_sign_mask(id_dest->width)) != 0);
   rtl_set_OF(&t0);
   rtl_set_CF(&t3);
 
@@ -112,7 +98,7 @@ make_EHelper(dec) {
 
 // neg 是取反加一，即 -dest = ~dest + 1
 make_EHelper(neg) {
-  uint32_t mask = mask_by_width(id_dest->width);
+  uint32_t mask = rtl_width_mask(id_dest->width);
   uint32_t dest = id_dest->val & mask;
 
   t2 = ((~dest) + 1) & mask;
@@ -122,7 +108,7 @@ make_EHelper(neg) {
   t0 = (dest != 0);
   rtl_set_CF(&t0);
 
-  t0 = (dest == sign_bit(id_dest->width));
+  t0 = (dest == rtl_sign_mask(id_dest->width));
   rtl_set_OF(&t0);
 
   print_asm_template1(neg);
