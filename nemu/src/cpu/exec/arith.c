@@ -1,5 +1,14 @@
 #include "cpu/exec.h"
 
+static inline int64_t sext_by_width(uint32_t x, int width) {
+  switch (width) {
+    case 1: return (int8_t)x;
+    case 2: return (int16_t)x;
+    case 4: return (int32_t)x;
+    default: assert(0);
+  }
+}
+
 make_EHelper(add) {
   // 先获取mask
   uint32_t mask = rtl_width_mask(id_dest->width); 
@@ -116,23 +125,28 @@ make_EHelper(neg) {
 
 // adc 是带进位的加法，即 dest + src + CF
 make_EHelper(adc) {
-  rtl_add(&t2, &id_dest->val, &id_src->val);
-  rtl_sltu(&t3, &t2, &id_dest->val);
-  rtl_get_CF(&t1);
-  rtl_add(&t2, &t2, &t1);
-  operand_write(id_dest, &t2);
+  uint32_t mask = rtl_width_mask(id_dest->width);
+  uint32_t bits = id_dest->width * 8;
+  uint32_t dest = id_dest->val & mask;
+  uint32_t src = id_src->val & mask;
 
+  rtl_get_CF(&t1);
+  uint32_t cf = t1 & 0x1;
+
+  uint64_t sum = (uint64_t)dest + (uint64_t)src + (uint64_t)cf;
+  t2 = sum & mask;
+  operand_write(id_dest, &t2);
   rtl_update_ZFSF(&t2, id_dest->width);
 
-  rtl_sltu(&t0, &t2, &id_dest->val);
-  rtl_or(&t0, &t3, &t0);
+  t0 = (sum >> bits) & 0x1;
   rtl_set_CF(&t0);
 
-  rtl_xor(&t0, &id_dest->val, &id_src->val);
-  rtl_not(&t0);
-  rtl_xor(&t1, &id_dest->val, &t2);
-  rtl_and(&t0, &t0, &t1);
-  rtl_msb(&t0, &t0, id_dest->width);
+  int64_t sdest = sext_by_width(dest, id_dest->width);
+  int64_t ssrc = sext_by_width(src, id_dest->width);
+  int64_t sres = sdest + ssrc + (int64_t)cf;
+  int64_t smin = -(1ll << (bits - 1));
+  int64_t smax =  (1ll << (bits - 1)) - 1;
+  t0 = (sres < smin || sres > smax);
   rtl_set_OF(&t0);
 
   print_asm_template2(adc);
@@ -140,26 +154,40 @@ make_EHelper(adc) {
 
 // sbb 是带借位的减法，即 dest - src - CF
 make_EHelper(sbb) {
-  rtl_sub(&t2, &id_dest->val, &id_src->val);
-  rtl_sltu(&t3, &id_dest->val, &t2);
+  // old_cf = CF
   rtl_get_CF(&t1);
-  rtl_sub(&t2, &t2, &t1);
-  operand_write(id_dest, &t2);
 
-  rtl_update_ZFSF(&t2, id_dest->width);
+  // result = dest - src - old_cf
+  rtl_sub(&t2, &id_dest->val, &id_src->val);  // tmp = dest - src
+  rtl_sub(&t2, &t2, &t1);                      // result = tmp - old_cf
 
-  rtl_sltu(&t0, &id_dest->val, &t2);
-  rtl_or(&t0, &t3, &t0);
+  // CF (borrow):
+  // borrow1 = (dest < src)
+  rtl_sltu(&t0, &id_dest->val, &id_src->val);
+
+  // tmp = dest - src
+  rtl_sub(&t3, &id_dest->val, &id_src->val);
+
+  // borrow2 = (tmp < old_cf)
+  rtl_sltu(&t1, &t3, &t1);
+
+  // CF = borrow1 | borrow2
+  rtl_or(&t0, &t0, &t1);
   rtl_set_CF(&t0);
 
+  // OF
   rtl_xor(&t0, &id_dest->val, &id_src->val);
   rtl_xor(&t1, &id_dest->val, &t2);
   rtl_and(&t0, &t0, &t1);
   rtl_msb(&t0, &t0, id_dest->width);
   rtl_set_OF(&t0);
 
+  rtl_update_ZFSF(&t2, id_dest->width);
+  operand_write(id_dest, &t2);
+
   print_asm_template2(sbb);
 }
+
 
 // mul 和 imul 的实现比较复杂，因为它们需要处理乘法结果的高位和低位，以及符号扩展等问题
 make_EHelper(mul) {
