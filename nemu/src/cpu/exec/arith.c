@@ -133,8 +133,9 @@ make_EHelper(adc) {
   rtl_get_CF(&t1);
   uint32_t cf = t1 & 0x1;
 
-  uint64_t sum = (uint64_t)dest + (uint64_t)src + (uint64_t)cf;
-  t2 = sum & mask;
+  uint64_t addend = (uint64_t)src + (uint64_t)cf;
+  uint64_t sum = (uint64_t)dest + addend;
+  t2 = (dest + addend) & mask;
   operand_write(id_dest, &t2);
   rtl_update_ZFSF(&t2, id_dest->width);
 
