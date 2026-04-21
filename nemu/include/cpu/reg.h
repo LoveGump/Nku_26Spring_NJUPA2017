@@ -2,6 +2,7 @@
 #define __REG_H__
 
 #include "common.h"
+#include "memory/mmu.h"
 
 // RTL 8 个寄存器
 enum { R_EAX, R_ECX, R_EDX, R_EBX, R_ESP, R_EBP, R_ESI, R_EDI };
@@ -48,6 +49,13 @@ typedef struct {
     };
     rtlreg_t eflags;
   };
+  // CR0 和 CR3 寄存器
+  CR0 cr0;
+  CR3 cr3;
+  struct {
+    uint16_t limit;
+    paddr_t base;
+  } idtr; // IDTR 寄存器
 
 } CPU_state;
 
