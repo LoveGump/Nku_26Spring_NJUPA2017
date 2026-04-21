@@ -1,12 +1,15 @@
 #include "cpu/exec.h"
 
+static inline void update_logic_zfsf_cf_of(const rtlreg_t *result, int width) {
+  rtl_update_ZFSF(result, width);
+  rtl_set_CF(&tzero);
+  rtl_set_OF(&tzero);
+}
+
 // test:按位与测试指令，计算 dest & src 的结果，但不写回目的操作数，只更新标志位
 make_EHelper(test) {
   rtl_and(&t2, &id_dest->val, &id_src->val);
-  rtl_update_ZFSF(&t2, id_dest->width);
-  rtl_li(&t0, 0);
-  rtl_set_CF(&t0);
-  rtl_set_OF(&t0);
+  update_logic_zfsf_cf_of(&t2, id_dest->width);
 
   print_asm_template2(test);
 }
@@ -15,10 +18,7 @@ make_EHelper(test) {
 make_EHelper(and) {
   rtl_and(&t2, &id_dest->val, &id_src->val);
   operand_write(id_dest, &t2);
-  rtl_update_ZFSF(&t2, id_dest->width);
-  rtl_li(&t0, 0);
-  rtl_set_CF(&t0);
-  rtl_set_OF(&t0);
+  update_logic_zfsf_cf_of(&t2, id_dest->width);
 
   print_asm_template2(and);
 }
@@ -26,10 +26,7 @@ make_EHelper(and) {
 make_EHelper(xor) {
   rtl_xor(&t2, &id_dest->val, &id_src->val);
   operand_write(id_dest, &t2);
-  rtl_update_ZFSF(&t2, id_dest->width);
-  rtl_li(&t0, 0);
-  rtl_set_CF(&t0);
-  rtl_set_OF(&t0);
+  update_logic_zfsf_cf_of(&t2, id_dest->width);
 
   print_asm_template2(xor);
 }
@@ -37,10 +34,7 @@ make_EHelper(xor) {
 make_EHelper(or) {
   rtl_or(&t2, &id_dest->val, &id_src->val);
   operand_write(id_dest, &t2);
-  rtl_update_ZFSF(&t2, id_dest->width);
-  rtl_li(&t0, 0);
-  rtl_set_CF(&t0);
-  rtl_set_OF(&t0);
+  update_logic_zfsf_cf_of(&t2, id_dest->width);
 
   print_asm_template2(or);
 }

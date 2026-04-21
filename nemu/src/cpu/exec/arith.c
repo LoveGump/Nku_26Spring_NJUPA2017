@@ -235,7 +235,6 @@ make_EHelper(imul1) {
       // 5. 更新 ZF/SF 满足 DiffTest
       rtl_update_ZFSF(&t1, 4);
       break;
-      break;
     default: assert(0);
   }
 
