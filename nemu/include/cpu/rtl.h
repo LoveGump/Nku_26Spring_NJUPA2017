@@ -122,10 +122,10 @@ static inline void rtl_sr(int r, int width, const rtlreg_t* src1) {
 // EFLAGS 标志位的读写
 #define make_rtl_setget_eflags(f) \
   static inline void concat(rtl_set_, f) (const rtlreg_t* src) { \
-    TODO(); \
+    reg_f(f) = *src; \
   } \
   static inline void concat(rtl_get_, f) (rtlreg_t* dest) { \
-    TODO(); \
+    *dest = reg_f(f); \
   }
 
 make_rtl_setget_eflags(CF)
@@ -135,59 +135,85 @@ make_rtl_setget_eflags(SF)
 
 static inline void rtl_mv(rtlreg_t* dest, const rtlreg_t *src1) {
   // dest <- src1
-  TODO();
+  *dest = *src1;
 }
 
 static inline void rtl_not(rtlreg_t* dest) {
   // dest <- ~dest
-  TODO();
+  *dest = ~(*dest);
 }
 
+// sect：根据 src1 的符号位扩展 src1 的值到 dest 中，宽度为 width 字节
 static inline void rtl_sext(rtlreg_t* dest, const rtlreg_t* src1, int width) {
   // dest <- signext(src1[(width * 8 - 1) .. 0])
-  TODO();
+  switch (width) {
+    case 1: *dest = (int8_t)(*src1); return;
+    case 2: *dest = (int16_t)(*src1); return;
+    case 4: *dest = *src1; return;
+    default: assert(0);
+  }
 }
 
+// push ：将 src1 的值压入栈中，更新 esp 的值
 static inline void rtl_push(const rtlreg_t* src1) {
   // esp <- esp - 4
   // M[esp] <- src1
-  TODO();
+  // 栈 是向下生长的，所以先将 esp 减小 4，然后将 src1 的值写入到 esp 指向的内存位置
+  rtlreg_t esp = reg_l(R_ESP) - 4;
+  reg_l(R_ESP) = esp; // 更新 esp 的值
+
+  rtl_sm(&esp, 4, src1);// 将 src1 的值写入到 esp 指向的内存位置
 }
 
+// pop ：从栈顶弹出一个值到 dest 中，更新 esp 的值
 static inline void rtl_pop(rtlreg_t* dest) {
   // dest <- M[esp]
   // esp <- esp + 4
-  TODO();
+  rtlreg_t esp = reg_l(R_ESP);
+  rtl_lm(dest, &esp, 4);
+  reg_l(R_ESP) = esp + 4;
 }
 
+// 是否等于0
 static inline void rtl_eq0(rtlreg_t* dest, const rtlreg_t* src1) {
   // dest <- (src1 == 0 ? 1 : 0)
-  TODO();
+  *dest = (*src1 == 0);
 }
 
+// 是否等于立即数 imm
 static inline void rtl_eqi(rtlreg_t* dest, const rtlreg_t* src1, int imm) {
   // dest <- (src1 == imm ? 1 : 0)
-  TODO();
+  *dest = (*src1 == (rtlreg_t)imm);
 }
 
+// 是否不等于0
 static inline void rtl_neq0(rtlreg_t* dest, const rtlreg_t* src1) {
   // dest <- (src1 != 0 ? 1 : 0)
-  TODO();
+  *dest = (*src1 != 0);
 }
 
+// msb：获取 src1 的最高有效位（符号位），宽度为 width 字节
 static inline void rtl_msb(rtlreg_t* dest, const rtlreg_t* src1, int width) {
   // dest <- src1[width * 8 - 1]
-  TODO();
+  assert(width == 1 || width == 2 || width == 4);
+  *dest = (*src1 >> (width * 8 - 1)) & 0x1;
 }
 
+// 更新 ZF 和 SF 标志位，result 是操作结果，width 是操作数的宽度
 static inline void rtl_update_ZF(const rtlreg_t* result, int width) {
   // eflags.ZF <- is_zero(result[width * 8 - 1 .. 0])
-  TODO();
+  assert(width == 1 || width == 2 || width == 4);
+  // if (width == 1) masked = *result & 0xFF;
+  // else if (width == 2) masked = *result & 0xFFFF;
+  // else masked = *result;
+  rtlreg_t masked = *result & (~0u >> ((4 - width) << 3));
+  cpu.ZF = (masked == 0);
 }
 
 static inline void rtl_update_SF(const rtlreg_t* result, int width) {
   // eflags.SF <- is_sign(result[width * 8 - 1 .. 0])
-  TODO();
+  assert(width == 1 || width == 2 || width == 4);
+  cpu.SF = (*result >> (width * 8 - 1)) & 0x1;
 }
 
 static inline void rtl_update_ZFSF(const rtlreg_t* result, int width) {

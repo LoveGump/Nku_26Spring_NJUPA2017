@@ -34,6 +34,21 @@ typedef struct {
 
   vaddr_t eip;
 
+  union {
+    struct {
+      uint32_t CF       : 1;
+      uint32_t          : 5;
+      uint32_t ZF       : 1;
+      uint32_t SF       : 1;
+      uint32_t          : 1;
+      uint32_t IF       : 1;
+      uint32_t          : 1;
+      uint32_t OF       : 1;
+      uint32_t          : 19;
+    };
+    rtlreg_t eflags;
+  };
+
 } CPU_state;
 
 extern CPU_state cpu;
@@ -49,6 +64,8 @@ static inline int check_reg_index(int index) {
 #define reg_w(index) (cpu.gpr[check_reg_index(index)]._16)
 // byte
 #define reg_b(index) (cpu.gpr[check_reg_index(index) & 0x3]._8[index >> 2])
+// eflags bit
+#define reg_f(flag) (cpu.flag)
 
 extern const char* regsl[];
 extern const char* regsw[];
