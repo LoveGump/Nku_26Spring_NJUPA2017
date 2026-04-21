@@ -5,53 +5,108 @@ make_EHelper(mov) {
   print_asm_template2(mov);
 }
 
+// push
 make_EHelper(push) {
-  TODO();
+  rtl_push(&id_dest->val);
 
   print_asm_template1(push);
 }
 
 make_EHelper(pop) {
-  TODO();
+  rtl_pop(&t0);
+  // pop 指令需要将栈顶的值写回到目的操作数中，
+  //调用 operand_write 来处理不同类型的目的操作数（寄存器或内存）
+  operand_write(id_dest, &t0);
 
   print_asm_template1(pop);
 }
 
+// pusha 一次性将所有通用寄存器的值压入栈中，顺序是 eax, ecx, edx, ebx, esp, ebp, esi, edi
 make_EHelper(pusha) {
-  TODO();
+  rtl_mv(&t0, &cpu.eax);
+  rtl_push(&t0);
+  rtl_mv(&t0, &cpu.ecx);
+  rtl_push(&t0);
+  rtl_mv(&t0, &cpu.edx);
+  rtl_push(&t0);
+  rtl_mv(&t0, &cpu.ebx);
+  rtl_push(&t0);
+
+  rtl_mv(&t0, &cpu.esp);
+  rtl_addi(&t0, &t0, 16);
+  rtl_push(&t0);
+
+  rtl_mv(&t0, &cpu.ebp);
+  rtl_push(&t0);
+  rtl_mv(&t0, &cpu.esi);
+  rtl_push(&t0);
+  rtl_mv(&t0, &cpu.edi);
+  rtl_push(&t0);
 
   print_asm("pusha");
 }
 
+// popa 一次性将栈顶的值弹出到所有通用寄存器中，顺序是 edi, esi, ebp, esp, ebx, edx, ecx, eax
 make_EHelper(popa) {
-  TODO();
+  rtl_pop(&t0);
+  rtl_sr_l(R_EDI, &t0);
+  rtl_pop(&t0);
+  rtl_sr_l(R_ESI, &t0);
+  rtl_pop(&t0);
+  rtl_sr_l(R_EBP, &t0);
+  rtl_pop(&t0);
+  rtl_pop(&t0);
+  rtl_sr_l(R_EBX, &t0);
+  rtl_pop(&t0);
+  rtl_sr_l(R_EDX, &t0);
+  rtl_pop(&t0);
+  rtl_sr_l(R_ECX, &t0);
+  rtl_pop(&t0);
+  rtl_sr_l(R_EAX, &t0);
 
   print_asm("popa");
 }
 
+// leave 指令用于函数返回，等价于 mov esp, ebp; pop ebp
 make_EHelper(leave) {
-  TODO();
+  rtl_lr_l(&t0, R_EBP);
+  rtl_sr_l(R_ESP, &t0);
+  rtl_pop(&t0);
+  rtl_sr_l(R_EBP, &t0);
 
   print_asm("leave");
 }
 
+// cltd：根据操作数的符号位将 edx 寄存器设置为 0 或 -1
+// 
 make_EHelper(cltd) {
   if (decoding.is_operand_size_16) {
-    TODO();
+    rtl_lr_w(&t0, R_AX);
+    rtl_msb(&t0, &t0, 2);
+    rtl_sub(&t1, &tzero, &t0);
+    rtl_sr_w(R_DX, &t1);
   }
   else {
-    TODO();
+    rtl_lr_l(&t0, R_EAX);
+    rtl_msb(&t0, &t0, 4);
+    rtl_sub(&t1, &tzero, &t0);
+    rtl_sr_l(R_EDX, &t1);
   }
 
   print_asm(decoding.is_operand_size_16 ? "cwtl" : "cltd");
 }
 
+// cwtl：根据操作数的符号位将 dest 寄存器的值扩展到更宽的寄存器中
 make_EHelper(cwtl) {
   if (decoding.is_operand_size_16) {
-    TODO();
+    rtl_lr_b(&t0, R_AL);
+    rtl_sext(&t0, &t0, 1);
+    rtl_sr_w(R_AX, &t0);
   }
   else {
-    TODO();
+    rtl_lr_w(&t0, R_AX);
+    rtl_sext(&t0, &t0, 2);
+    rtl_sr_l(R_EAX, &t0);
   }
 
   print_asm(decoding.is_operand_size_16 ? "cbtw" : "cwtl");
