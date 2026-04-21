@@ -219,6 +219,21 @@ make_EHelper(imul1) {
     case 4:
       rtl_sr_l(R_EAX, &t1); // EAX 存低位
       rtl_sr_l(R_EDX, &t0); // EDX 存高位
+// 1. 获取低位结果的符号扩展（全 0 或全 1）
+      rtl_sari(&t2, &t1, 31); 
+      
+      // 2. 比较高位 (t0) 和符号扩展 (t2) 是否相等
+      rtl_xor(&t3, &t0, &t2); // 如果相等，t3 为 0；如果不等，t3 非 0
+      
+      // 3. 利用 rtl_neq0 判定是否溢出
+      rtl_neq0(&t3, &t3);     // 如果 t3 != 0，则 t3 = 1
+      
+      // 4. 设置溢出标志位
+      rtl_set_CF(&t3);
+      rtl_set_OF(&t3);
+
+      // 5. 更新 ZF/SF 满足 DiffTest
+      rtl_update_ZFSF(&t1, 4);
       break;
       break;
     default: assert(0);
