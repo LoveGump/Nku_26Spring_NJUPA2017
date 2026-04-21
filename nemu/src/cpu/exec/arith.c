@@ -217,8 +217,9 @@ make_EHelper(imul1) {
       rtl_sr_w(R_DX, &t1);
       break;
     case 4:
-      rtl_sr_l(R_EDX, &t0);
-      rtl_sr_l(R_EAX, &t1);
+      rtl_sr_l(R_EAX, &t1); // EAX 存低位
+      rtl_sr_l(R_EDX, &t0); // EDX 存高位
+      break;
       break;
     default: assert(0);
   }
@@ -234,6 +235,8 @@ make_EHelper(imul2) {
   rtl_imul(&t0, &t1, &id_dest->val, &id_src->val);
   operand_write(id_dest, &t1);
 
+  rtl_update_ZFSF(&t1, id_dest->width);
+
   print_asm_template2(imul);
 }
 
@@ -246,6 +249,7 @@ make_EHelper(imul3) {
   rtl_imul(&t0, &t1, &id_src2->val, &id_src->val);
   operand_write(id_dest, &t1);
 
+  rtl_update_ZFSF(&t1, id_dest->width);
   print_asm_template3(imul);
 }
 
