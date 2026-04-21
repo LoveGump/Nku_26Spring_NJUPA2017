@@ -46,8 +46,18 @@ static inline make_DopHelper(SI) {
    *
    op->simm = ???
    */
-  TODO();
 
+  // 使用 instr_fetch() 从内存中读取 op->width 字节的立即数
+  // 
+  if (op->width == 1) {
+    // 这里我们使用 int8_t 来读取 1 字节的立即数，并将其符号扩展为 32 位
+    // 隐式类型转换
+    op->simm = (int8_t)instr_fetch(eip, 1);
+  } else {
+    op->simm = (int32_t)instr_fetch(eip, 4);
+  }
+
+  // 赋值给 op->simm 后，将其加载到 op->val 寄存器中
   rtl_li(&op->val, op->simm);
 
 #ifdef DEBUG
