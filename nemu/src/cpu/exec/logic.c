@@ -57,11 +57,17 @@ make_EHelper(sar) {
 }
 
 make_EHelper(shl) {
+  // 按照 x86 规范，移位次数需与 0x1f 相与（只取低 5 位）
   rtl_andi(&t1, &id_src->val, 0x1f);
+  
   rtl_shl(&t2, &id_dest->val, &t1);
   operand_write(id_dest, &t2);
-  rtl_update_ZFSF(&t2, id_dest->width);
-  // unnecessary to update CF and OF in NEMU
+
+  // fixed
+  // 只有当移位次数不为 0 时，才更新 ZF 和 SF
+  if (t1 != 0) {
+    rtl_update_ZFSF(&t2, id_dest->width);
+  }
 
   print_asm_template2(shl);
 }
@@ -70,8 +76,11 @@ make_EHelper(shr) {
   rtl_andi(&t1, &id_src->val, 0x1f);
   rtl_shr(&t2, &id_dest->val, &t1);
   operand_write(id_dest, &t2);
-  rtl_update_ZFSF(&t2, id_dest->width);
-  // unnecessary to update CF and OF in NEMU
+
+  // fixed
+  if (t1 != 0) {
+    rtl_update_ZFSF(&t2, id_dest->width);
+  }
 
   print_asm_template2(shr);
 }
