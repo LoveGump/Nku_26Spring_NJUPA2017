@@ -119,6 +119,16 @@ static inline void rtl_sr(int r, int width, const rtlreg_t* src1) {
   }
 }
 
+static inline uint32_t rtl_width_mask(int width) {
+  assert(width == 1 || width == 2 || width == 4);
+  return width == 4 ? 0xffffffffu : ((1u << (width * 8)) - 1);
+}
+
+static inline uint32_t rtl_sign_mask(int width) {
+  assert(width == 1 || width == 2 || width == 4);
+  return 1u << (width * 8 - 1);
+}
+
 // EFLAGS 标志位的读写
 #define make_rtl_setget_eflags(f) \
   static inline void concat(rtl_set_, f) (const rtlreg_t* src) { \
