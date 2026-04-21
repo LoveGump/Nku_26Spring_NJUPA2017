@@ -79,34 +79,26 @@ make_EHelper(sar) {
 make_EHelper(shl) {
   rtl_andi(&t1, &id_src->val, 0x1f);
   if (t1 != 0) {
-    // 1. 更新 CF (你之前可能已经补了)
+    // 1. 获取最后移出的一位存入 CF (你可能已实现)
     rtl_subi(&t0, &t1, 1);
     rtl_shl(&t0, &id_dest->val, &t0);
     rtl_msb(&t0, &t0, id_dest->width);
     rtl_set_CF(&t0);
 
-    // 2. 执行移位
+    // 2. 执行实际移位
     rtl_shl(&t2, &id_dest->val, &t1);
     operand_write(id_dest, &t2);
     
     // 3. 更新 ZF/SF
     rtl_update_ZFSF(&t2, id_dest->width);
 
-    // 4. 关键：针对 DiffTest 补全 OF
-    // 如果移位次数为 1，OF = (最高位 ^ 进位位)
-    // 如果移位次数 > 1，虽然未定义，但我们可以尝试按次数为 1 的逻辑设置，或者清零
-    // 从日志看 QEMU 设为了 1，尝试增加如下逻辑：
-    if (t1 == 1) {
-      rtl_msb(&t0, &t2, id_dest->width); // 移位后的最高位
-      rtl_get_CF(&t3);                   // 此时的 CF
-      rtl_xor(&t0, &t0, &t3);            // OF = MSB ^ CF
-      rtl_set_OF(&t0);
-    } else {
-      // 次数 > 1 时，QEMU 有时会根据最后一次移位设置 OF
-      // 或者干脆在这里也执行一次逻辑以匹配 QEMU
-      t0 = 0; // 如果还是报错，可以尝试强制清零看看 QEMU 的反应
-      rtl_set_OF(&t0);
-    }
+    // 4. 针对 DiffTest 补全 OF
+    // 如果移位次数为 1，OF = 结果最高位 ^ CF
+    // 为了匹配 QEMU，次数 > 1 时我们也执行此判定
+    rtl_msb(&t0, &t2, id_dest->width); // 结果的 MSB
+    rtl_get_CF(&t3);                   // 刚刚设置的 CF
+    rtl_xor(&t0, &t0, &t3);            // 如果 MSB != CF，则 OF = 1
+    rtl_set_OF(&t0);
   }
   print_asm_template2(shl);
 }
