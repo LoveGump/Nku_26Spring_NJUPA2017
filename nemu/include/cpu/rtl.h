@@ -211,19 +211,17 @@ static inline void rtl_msb(rtlreg_t* dest, const rtlreg_t* src1, int width) {
 
 // 更新 ZF 和 SF 标志位，result 是操作结果，width 是操作数的宽度
 static inline void rtl_update_ZF(const rtlreg_t* result, int width) {
-  // eflags.ZF <- is_zero(result[width * 8 - 1 .. 0])
-  assert(width == 1 || width == 2 || width == 4);
-  // if (width == 1) masked = *result & 0xFF;
-  // else if (width == 2) masked = *result & 0xFFFF;
-  // else masked = *result;
-  rtlreg_t masked = *result & (~0u >> ((4 - width) << 3));
+  rtlreg_t masked = 0;
+  if (width == 4) masked = *result;
+  else masked = *result & ((1u << (width << 3)) - 1);
   cpu.ZF = (masked == 0);
 }
 
 static inline void rtl_update_SF(const rtlreg_t* result, int width) {
-  // eflags.SF <- is_sign(result[width * 8 - 1 .. 0])
-  assert(width == 1 || width == 2 || width == 4);
-  cpu.SF = (*result >> (width * 8 - 1)) & 0x1;
+  // 核心逻辑：提取对应宽度的最高位（符号位）
+  // 比如 8 位取 bit 7, 16 位取 bit 15, 32 位取 bit 31
+  rtlreg_t sign_bit = (*result >> (width * 8 - 1)) & 0x1;
+  cpu.SF = sign_bit;
 }
 
 static inline void rtl_update_ZFSF(const rtlreg_t* result, int width) {
