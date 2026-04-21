@@ -3,18 +3,25 @@
 
 /* shared by all helper functions */
 DecodeInfo decoding;
-rtlreg_t t0, t1, t2, t3;
-const rtlreg_t tzero = 0;
+rtlreg_t t0, t1, t2, t3; // 临时寄寄存器
+const rtlreg_t tzero = 0; // 0 寄存器
 
+// 参数分别为 eip 操作数 是否加载操作数的值
 #define make_DopHelper(name) void concat(decode_op_, name) (vaddr_t *eip, Operand *op, bool load_val)
 
 /* Refer to Appendix A in i386 manual for the explanations of these abbreviations */
 
 /* Ib, Iv */
-static inline make_DopHelper(I) {
+// 对应 指令为  
+// Ib：8 bit 立即数
+// Iv：16/32 bit 立即数，按照当前的宽度
+// 这里的 eip 指向立即数的地址
+static inline make_DopHelper(I) { 
   /* eip here is pointing to the immediate */
-  op->type = OP_TYPE_IMM;
+  op->type = OP_TYPE_IMM; // 设置 立即数类型
+  // 按照宽度 读取对应的字节
   op->imm = instr_fetch(eip, op->width);
+  // 将立即数的指 加载到 op->val 寄存器中
   rtl_li(&op->val, op->imm);
 
 #ifdef DEBUG
@@ -27,6 +34,7 @@ static inline make_DopHelper(I) {
  * function to decode it.
  */
 /* sign immediate */
+// si 表示有符号立即数
 static inline make_DopHelper(SI) {
   assert(op->width == 1 || op->width == 4);
 

@@ -8,6 +8,7 @@ extern const rtlreg_t tzero;
 
 /* RTL basic instructions */
 
+// 将立即数 imm 加载到寄存器 dest 中
 static inline void rtl_li(rtlreg_t* dest, uint32_t imm) {
   *dest = imm;
 }

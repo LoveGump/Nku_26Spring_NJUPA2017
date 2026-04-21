@@ -13,6 +13,8 @@ typedef struct {
 #define EX(ex)             EXW(ex, 0)
 #define EMPTY              EX(inv)
 
+// 设置 src / dest / src2 的宽度
+// 如果是 0 则使用is_operand_size_16 来判断是 2 还是 4
 static inline void set_width(int width) {
   if (width == 0) {
     width = decoding.is_operand_size_16 ? 2 : 4;
@@ -21,8 +23,11 @@ static inline void set_width(int width) {
 }
 
 /* Instruction Decode and EXecute */
+// 指令解码和执行
 static inline void idex(vaddr_t *eip, opcode_entry *e) {
   /* eip is pointing to the byte next to opcode */
+  // eip 指向操作码的下一个字节
+  // 执行指令的解码函数和执行函数
   if (e->decode)
     e->decode(eip);
   e->execute(eip);
@@ -212,12 +217,17 @@ static make_EHelper(2byte_esc) {
   idex(eip, &opcode_table[opcode]);
 }
 
+// exec+name 
+// 这里是 exec_real(vaddr_t *eip)
 make_EHelper(real) {
   // 获得指令的操作码
   uint32_t opcode = instr_fetch(eip, 1);
   // 将操作码保存到全局编码信息decoding中，供指令解码阶段使用
+  // 取出第一个字节对应的指令信息
   decoding.opcode = opcode;
   
+  // 根据操作码从opcode_table中取出对应的指令信息，
+  // 设置操作数宽度，并调用指令解码和执行函数
   set_width(opcode_table[opcode].width);
   idex(eip, &opcode_table[opcode]);
 }
@@ -233,7 +243,9 @@ void exec_wrapper(bool print_flag) {
 #endif
   // 保存cpu的eip到全局编码信息decoding中，供指令解码阶段使用
   decoding.seq_eip = cpu.eip;
+  // 将地址作为参数传入 exec_real()
   exec_real(&decoding.seq_eip);
+  // 执行完指令后，decoding.seq_eip已经被更新为下一条指令的地址
 
 #ifdef DEBUG
   int instr_len = decoding.seq_eip - cpu.eip;

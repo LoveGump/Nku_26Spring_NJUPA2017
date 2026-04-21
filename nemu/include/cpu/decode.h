@@ -5,21 +5,23 @@
 
 #include "rtl.h"
 
+// 操作数类型：寄存器、内存、立即数
 enum { OP_TYPE_REG, OP_TYPE_MEM, OP_TYPE_IMM };
 
+// str 的 长度
 #define OP_STR_SIZE 40
 
 typedef struct {
   uint32_t type;  // 操作数类型：寄存器、内存、立即数
   int width;      // 操作数宽度：1、2、4字节
   union {
-    uint32_t reg;
-    rtlreg_t addr;
-    uint32_t imm;
-    int32_t simm;
-  };              
-  rtlreg_t val;   // 操作数的值：寄存器值、内存值、立即数值
-  char str[OP_STR_SIZE];    // 操作数的字符串表示，用于调试输出
+    uint32_t reg;   // 寄存器编号
+    rtlreg_t addr;  // 内存地址
+    uint32_t imm;   // 立即数值
+    int32_t simm;   // 有符号立即数
+  };         
+  rtlreg_t val;   // 操作数的实际值
+  char str[OP_STR_SIZE];    // 操作数的字符串名字，用于调试输出
 } Operand;
 
 typedef struct {
@@ -70,6 +72,8 @@ extern DecodeInfo decoding;
 #define id_src (&decoding.src)
 #define id_src2 (&decoding.src2)
 #define id_dest (&decoding.dest)
+
+// 构建 decode 辅助函数
 
 #define make_DHelper(name) void concat(decode_, name) (vaddr_t *eip)
 typedef void (*DHelper) (vaddr_t *);
