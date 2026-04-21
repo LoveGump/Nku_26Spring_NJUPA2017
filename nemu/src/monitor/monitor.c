@@ -55,6 +55,7 @@ static inline int load_default_img() {
 static inline void load_img() {
   long size;
   if (img_file == NULL) {
+    // 默认程序
     size = load_default_img();
   }
   else {

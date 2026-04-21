@@ -156,11 +156,48 @@ void difftest_step(uint32_t eip) {
   gdb_si();
   gdb_getregs(&r);
 
-  // TODO: Check the registers state with QEMU.
+  // TODO(finished): Check the registers state with QEMU.
   // Set `diff` as `true` if they are not the same.
-  TODO();
+  int i;
+  // 比较通用寄存器和 EIP 的值，如果不相同则记录差异并打印日志
+  for (i = 0; i < 8; i ++) {
+    if (reg_l(i) != r.array[i]) {
+      Log("Differ at eip = 0x%08x: %s, NEMU = 0x%08x, QEMU = 0x%08x",
+          eip, regsl[i], reg_l(i), r.array[i]);
+      diff = true;
+    }
+  }
+
+  if (cpu.eip != r.eip) {
+    Log("Differ at eip = 0x%08x: eip, NEMU = 0x%08x, QEMU = 0x%08x",
+        eip, cpu.eip, r.eip);
+    diff = true;
+  }
+
+  // 比较 EFLAGS 的值时，只关注部分标志位，
+  // 因为某些标志位可能会因为实现细节而有所不同，例如 IOPL、NT 等
+  uint32_t eflags_mask = (1u << 0) | (1u << 6) | (1u << 7) | (1u << 9) | (1u << 11);
+  uint32_t nemu_eflags = cpu.eflags & eflags_mask;
+  uint32_t qemu_eflags = r.eflags & eflags_mask;
+  if (nemu_eflags != qemu_eflags) {
+    Log("Differ at eip = 0x%08x: eflags(masked), NEMU = 0x%08x, QEMU = 0x%08x",
+        eip, nemu_eflags, qemu_eflags);
+    diff = true;
+  }
+
+  // 如果有差异，打印 NEMU 和 QEMU 的寄存器状态，方便调试
+  if (diff) {
+    Log("NEMU register state:");
+    isa_reg_display();
+    Log("QEMU register state:");
+    for (i = 0; i < 8; i ++) {
+      Log("%s\t0x%08x", regsl[i], r.array[i]);
+    }
+    Log("eip\t0x%08x", r.eip);
+  }
 
   if (diff) {
+    // 如果有差异，退出程序，进入调试状态
     nemu_state = NEMU_END;
   }
 }
