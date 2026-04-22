@@ -129,6 +129,31 @@ make_EHelper(shr) {
   print_asm_template2(shr);
 }
 
+// rol：循环左移，类似于 shl，但移出的位会被重新移入到另一端
+make_EHelper(rol) {
+  uint32_t bits = id_dest->width * 8;
+  uint32_t count = (id_src->val & 0x1f) % bits;
+  uint32_t mask = (bits == 32) ? 0xffffffffu : ((1u << bits) - 1);
+  uint32_t orig = id_dest->val & mask;
+
+  if (count != 0) {
+    uint32_t result = ((orig << count) | (orig >> (bits - count))) & mask;
+    rtl_li(&t2, result);
+    operand_write(id_dest, &t2);
+
+    rtl_andi(&t0, &t2, 1);
+    rtl_set_CF(&t0);
+
+    if (count == 1) {
+      rtl_msb(&t1, &t2, id_dest->width);
+      rtl_xor(&t1, &t1, &t0);
+      rtl_set_OF(&t1);
+    }
+  }
+
+  print_asm_template2(rol);
+}
+
 make_EHelper(setcc) {
   uint8_t subcode = decoding.opcode & 0xf;
   rtl_setcc(&t2, subcode);
