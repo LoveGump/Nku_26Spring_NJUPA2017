@@ -27,7 +27,22 @@ void _draw_rect(const uint32_t *pixels, int x, int y, int w, int h) {
   int i;
   for (i = 0; i < _screen.width * _screen.height; i++) {
     fb[i] = i;
+  if (w <= 0 || h <= 0 || x >= _screen.width || y >= _screen.height) {
+    return;
   }
+
+  int copy_w = w;
+  if (x + copy_w > _screen.width) {
+    copy_w = _screen.width - x;
+  }
+  int copy_bytes = copy_w * sizeof(uint32_t);
+
+  for (int j = 0; j < h && y + j < _screen.height; j++) {
+    memcpy(&fb[(y + j) * _screen.width + x], pixels, copy_bytes);
+    pixels += w;
+  }
+}
+
 }
 
 // 用于将之前的绘制内容同步到屏幕上 (在NEMU中绘制内容总是会同步到屏幕上, 因而无需实现此API)
