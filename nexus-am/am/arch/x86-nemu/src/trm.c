@@ -19,14 +19,15 @@ _Area _heap = {
 
 static void serial_init() {
   // Initialize the serial port for output
+  // 初始化串口，设置波特率、数据位、停止位等参数
 #ifdef HAS_SERIAL
-  outb(SERIAL_PORT + 1, 0x00);  
-  outb(SERIAL_PORT + 3, 0x80);
-  outb(SERIAL_PORT + 0, 0x01);
-  outb(SERIAL_PORT + 1, 0x00);
-  outb(SERIAL_PORT + 3, 0x03);
-  outb(SERIAL_PORT + 2, 0xC7);
-  outb(SERIAL_PORT + 4, 0x0B);
+  outb(SERIAL_PORT + 1, 0x00);  // 取消中断
+  outb(SERIAL_PORT + 3, 0x80);  // 进入波特率设置模式
+  outb(SERIAL_PORT + 0, 0x01);  // 设置波特率为 115200 (除数为 1)
+  outb(SERIAL_PORT + 1, 0x00);  // 波特率高字节为 0
+  outb(SERIAL_PORT + 3, 0x03);  // 8 数据位，无校验，1 停止位
+  outb(SERIAL_PORT + 2, 0xC7);  // FIFO 控制寄存器：启用 FIFO，清空接收和发送 FIFO，设置触发点为 14 字节
+  outb(SERIAL_PORT + 4, 0x0B);  // 使能中断，允许接收数据可用中断和发送缓冲区空中断
 #endif
 }
 
