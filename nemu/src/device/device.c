@@ -73,6 +73,7 @@ void sdl_clear_event_queue() {
   while (SDL_PollEvent(&event));
 }
 
+// 对四个设备进行初始化，设置好定时器中断处理函数，并启动定时器
 void init_device() {
   init_serial();
   init_timer();
@@ -85,6 +86,7 @@ void init_device() {
   int ret = sigaction(SIGVTALRM, &s, NULL);
   Assert(ret == 0, "Can not set signal handler");
 
+  // 注册定时器中断处理函数，设置定时器的初始值和间隔
   it.it_value.tv_sec = 0;
   it.it_value.tv_usec = 1000000 / TIMER_HZ;
   ret = setitimer(ITIMER_VIRTUAL, &it, NULL);
