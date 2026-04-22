@@ -16,7 +16,9 @@ void serial_io_handler(ioaddr_t addr, int len, bool is_write) {
       char c = serial_port_base[CH_OFFSET];
       /* We bind the serial port with the host stdout in NEMU. */
       putc(c, stdout);
-      fflush(stdout);
+      if (c == '\n') {
+        fflush(stdout);
+      }
     }
   }
 }
