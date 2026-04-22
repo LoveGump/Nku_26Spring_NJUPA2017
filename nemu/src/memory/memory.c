@@ -4,40 +4,30 @@
 // 模拟内存
 #define PMEM_SIZE (128 * 1024 * 1024)
 
+#define pmem_rw(addr, type) *(type *)({\
+    Assert(addr < PMEM_SIZE, "physical address(0x%08x) is out of bound", addr); \
+    guest_to_host(addr); \
+    })
+
 uint8_t pmem[PMEM_SIZE];
 
 /* Memory accessing interfaces */
 
 // 模拟内存的读写接口：物理地址读写和虚拟地址读写
 uint32_t paddr_read(paddr_t addr, int len) {
-  Assert(len == 1 || len == 2 || len == 4, "invalid read len = %d", len);
-
+  // 首先判断是否访问的是MMIO地址，如果是则调用mmio_read函数进行读操作，否则直接从模拟内存中读取数据
   int map_NO = is_mmio(addr);
   if (map_NO != -1) {
     return mmio_read(addr, len, map_NO);
   }
-
-  Assert((uint64_t)addr + len - 1 < PMEM_SIZE,
-      "physical read out of bound: addr = 0x%08x, len = %d, eip = 0x%08x",
-      addr, len, cpu.eip);
-
-  uint32_t data = 0;
-  memcpy(&data, guest_to_host(addr), len);
-  return data;
+  return pmem_rw(addr, uint32_t) & (~0u >> ((4 - len) << 3));
 }
 void paddr_write(paddr_t addr, int len, uint32_t data) {
-  Assert(len == 1 || len == 2 || len == 4, "invalid write len = %d", len);
-
   int map_NO = is_mmio(addr);
   if (map_NO != -1) {
     mmio_write(addr, len, data, map_NO);
     return;
   }
-
-  Assert((uint64_t)addr + len - 1 < PMEM_SIZE,
-      "physical write out of bound: addr = 0x%08x, len = %d, eip = 0x%08x",
-      addr, len, cpu.eip);
-
   memcpy(guest_to_host(addr), &data, len);
 }
 
