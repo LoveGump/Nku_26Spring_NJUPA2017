@@ -41,7 +41,7 @@ ARGS ?= -l $(BUILD_DIR)/nemu-log.txt
 NEMU_EXEC := $(BINARY) $(ARGS)
 
 # Use `make count BASE_BRANCH=origin/2017` if your framework baseline is `origin/2017`.
-BASE_BRANCH ?= pa0
+BASE_BRANCH ?= pa1
 COUNT_FILE_EXPR = find . -type f \( -name "*.c" -o -name "*.h" \)
 
 $(BINARY): $(OBJS)
