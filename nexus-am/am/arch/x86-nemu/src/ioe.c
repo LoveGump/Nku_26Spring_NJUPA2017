@@ -1,10 +1,8 @@
 #include <am.h>
 #include <x86.h>
+#include "../../../../../nemu/include/device/i8042.h"
 
 #define RTC_PORT 0x48   // Note that this is not standard
-#define I8042_DATA_PORT 0x60
-#define I8042_STATUS_PORT 0x64        
-#define I8042_STATUS_HASKEY_MASK 0x1 // I8042 状态寄存器中表示是否有键可读的位
 static unsigned long boot_time;
 
 void _ioe_init() {
