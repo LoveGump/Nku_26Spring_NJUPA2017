@@ -32,13 +32,17 @@ $(OBJ_DIR)/%.o: src/%.c
 
 # Some convinient rules
 
-.PHONY: app run submit clean count count-nonempty count-added
+.PHONY: app run gdb submit clean count count-nonblank
 app: $(BINARY)
 
 ARGS ?= -l $(BUILD_DIR)/nemu-log.txt
 
 # Command to execute NEMU
 NEMU_EXEC := $(BINARY) $(ARGS)
+
+# Use `make count BASE_BRANCH=origin/2017` if your framework baseline is `origin/2017`.
+BASE_BRANCH ?= pa0
+COUNT_FILE_EXPR = find . -type f \( -name "*.c" -o -name "*.h" \)
 
 $(BINARY): $(OBJS)
 	$(call git_commit, "compile")
@@ -53,16 +57,19 @@ gdb: $(BINARY)
 	$(call git_commit, "gdb")
 	gdb -s $(BINARY) --args $(NEMU_EXEC)
 
-
-
 count:
-	@cat $(CODE_FILES) | wc -l
+	@cur_total=$$($(COUNT_FILE_EXPR) -print0 | xargs -0 cat | wc -l); \
+	base_total=$$(git -C .. ls-tree -r --name-only $(BASE_BRANCH) -- nemu | grep -E '\.(c|h)$$' | while read -r f; do git -C .. show $(BASE_BRANCH):$$f; done | wc -l); \
+	echo "current total lines (.c/.h): $$cur_total"; \
+	echo "$(BASE_BRANCH) total lines (.c/.h): $$base_total"; \
+	echo "added lines since $(BASE_BRANCH): $$((cur_total - base_total))"
 
-count-nonempty:
-	@grep -h -v '^[[:space:]]*$$' $(CODE_FILES) | wc -l
-
-count-added:
-	@git diff --numstat $(COUNT_BASE)..$(COUNT_REF) -- src include | awk '{add += $$1} END {print add + 0}'
+count-nonblank:
+	@cur_nonblank=$$($(COUNT_FILE_EXPR) -print0 | xargs -0 cat | grep -av '^[[:space:]]*$$' | wc -l); \
+	base_nonblank=$$(git -C .. ls-tree -r --name-only $(BASE_BRANCH) -- nemu | grep -E '\.(c|h)$$' | while read -r f; do git -C .. show $(BASE_BRANCH):$$f; done | grep -av '^[[:space:]]*$$' | wc -l); \
+	echo "current non-blank lines (.c/.h): $$cur_nonblank"; \
+	echo "$(BASE_BRANCH) non-blank lines (.c/.h): $$base_nonblank"; \
+	echo "added non-blank lines since $(BASE_BRANCH): $$((cur_nonblank - base_nonblank))"
 
 clean: 
 	rm -rf $(BUILD_DIR)
