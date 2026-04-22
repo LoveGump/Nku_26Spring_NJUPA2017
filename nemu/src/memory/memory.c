@@ -1,4 +1,5 @@
 #include "nemu.h"
+#include "device/mmio.h"
 
 // 模拟内存
 #define PMEM_SIZE (128 * 1024 * 1024)
@@ -14,9 +15,19 @@ uint8_t pmem[PMEM_SIZE];
 
 // 模拟内存的读写接口：物理地址读写和虚拟地址读写
 uint32_t paddr_read(paddr_t addr, int len) {
+  // 首先判断是否访问的是MMIO地址，如果是则调用mmio_read函数进行读操作，否则直接从模拟内存中读取数据
+  int map_NO = is_mmio(addr);
+  if (map_NO != -1) {
+    return mmio_read(addr, len, map_NO);
+  }
   return pmem_rw(addr, uint32_t) & (~0u >> ((4 - len) << 3));
 }
 void paddr_write(paddr_t addr, int len, uint32_t data) {
+  int map_NO = is_mmio(addr);
+  if (map_NO != -1) {
+    mmio_write(addr, len, data, map_NO);
+    return;
+  }
   memcpy(guest_to_host(addr), &data, len);
 }
 
