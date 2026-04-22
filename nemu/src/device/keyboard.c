@@ -1,10 +1,8 @@
 #include "device/port-io.h"
+#include "device/i8042.h"
 #include "monitor/monitor.h"
 #include <SDL2/SDL.h>
 
-#define I8042_DATA_PORT 0x60
-#define I8042_STATUS_PORT 0x64
-#define I8042_STATUS_HASKEY_MASK 0x1
 #define KEYBOARD_IRQ 1
 
 static uint32_t *i8042_data_port_base;
