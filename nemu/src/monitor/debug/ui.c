@@ -195,6 +195,7 @@ static int cmd_help(char *args) {
 
 void ui_mainloop(int is_batch_mode) {
   if (is_batch_mode) {
+    // 批处理模式
     cmd_c(NULL);
     return;
   }

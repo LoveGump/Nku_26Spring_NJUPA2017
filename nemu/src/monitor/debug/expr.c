@@ -10,7 +10,7 @@
 enum {
   TK_NOTYPE = 256, TK_EQ,
 
-  /* TODO: Add more token types */
+  /* TODO(finished): Add more token types */
   TK_NUM, // 十进制数字
   TK_HEX, // 十六进制数字
   TK_REG, // 寄存器
@@ -28,10 +28,9 @@ static struct rule {
   int token_type;
 } rules[] = {
 
-    /* TODO: Add more rules.
+    /* TODO(finished): Add more rules.
    * Pay attention to the precedence level of different rules.
    */
-
   {" +", TK_NOTYPE},              // spaces
   {"\\+", '+'},                   // plus
   {"-", '-'},                     // minus
