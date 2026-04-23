@@ -10,7 +10,7 @@
 enum {
   TK_NOTYPE = 256, TK_EQ,
 
-  /* TODO: Add more token types */
+  /* TODO(finished): Add more token types */
   TK_NUM, // 十进制数字
   TK_HEX, // 十六进制数字
   TK_REG, // 寄存器
@@ -28,10 +28,9 @@ static struct rule {
   int token_type;
 } rules[] = {
 
-    /* TODO: Add more rules.
+    /* TODO(finished): Add more rules.
    * Pay attention to the precedence level of different rules.
    */
-
   {" +", TK_NOTYPE},              // spaces
   {"\\+", '+'},                   // plus
   {"-", '-'},                     // minus
@@ -96,7 +95,7 @@ static bool make_token(char *e) {
             i, rules[i].regex, position, substr_len, substr_len, substr_start);
         position += substr_len;
 
-        /* TODO: Now a new token is recognized with rules[i]. Add codes
+        /* TODO(finished): Now a new token is recognized with rules[i]. Add codes
          * to record the token in the array `tokens'. For certain types
          * of tokens, some extra actions should be performed.
          */
@@ -386,7 +385,7 @@ uint32_t expr(char *e, bool *success) {
     *success = false;
     return 0;
   }
-  /* TODO: Insert codes to evaluate the expression. */
+  /* TODO(finished): Insert codes to evaluate the expression. */
   if (nr_token == 0) {
     *success = false;
     return 0;
