@@ -7,6 +7,7 @@ void diff_test_skip_nemu();
 // implementation of `lidt' instruction
 void raise_intr(uint8_t NO, vaddr_t ret_addr);
 
+// lidt ： 从内存中加载 IDTR 寄存器
 make_EHelper(lidt) {
   // 在 x86 里，LIDT 是 Load IDTR 指令，
   // 用来把内存中的 6 字节描述符加载到 IDTR（中断描述符表寄存器）
@@ -16,18 +17,23 @@ make_EHelper(lidt) {
   // |      Limit      |       Base      |
   // |     2 bytes     |     4 bytes     |
   // +-----------------+-----------------+
-  cpu.idtr.limit = vaddr_read(id_dest->addr, 2);
-  cpu.idtr.base = vaddr_read(id_dest->addr + 2, 4);
+  rtl_li(&t0, id_dest->addr);
+  rtl_lm(&t1, &t0, 2);
+  rtl_addi(&t0, &t0, 2);
+  rtl_lm(&t2, &t0, 4);
+
+  cpu.idtr.limit = t1;
+  cpu.idtr.base = t2;
 
   print_asm_template1(lidt);
 }
 
 // move_r2cr : 将通用寄存器的值移动到控制寄存器中
 make_EHelper(mov_r2cr) {
+  rtl_mv(&t0, &id_src->val);
   switch (id_dest->reg) {
-    // 在 x86 架构中，常见的控制寄存器有 CR0、CR3 等
-    case 0: cpu.cr0.val = id_src->val; break;
-    case 3: cpu.cr3.val = id_src->val; break;
+    case 0: cpu.cr0.val = t0; break;
+    case 3: cpu.cr3.val = t0; break;
     default: panic("unsupported control register CR%d", id_dest->reg);
   }
 
@@ -36,8 +42,8 @@ make_EHelper(mov_r2cr) {
 
 // move_cr2r : 将控制寄存器的值移动到通用寄存器中
 make_EHelper(mov_cr2r) {
+  
   switch (id_src->reg) {
-    // 加载到通用寄存器时，根据控制寄存器的编号，获取对应的值
     case 0: rtl_li(&t0, cpu.cr0.val); break;
     case 3: rtl_li(&t0, cpu.cr3.val); break;
     default: panic("unsupported control register CR%d", id_src->reg);
@@ -54,7 +60,8 @@ make_EHelper(mov_cr2r) {
 // exec_int ： 执行一个软件中断，参数 NO 是中断号，ret_addr 是返回地址
 make_EHelper(int) {
 
-  raise_intr(id_dest->val, *eip);
+  rtl_andi(&t0, &id_dest->val, 0xff); // 记录中断号，取低8位
+  raise_intr(t0, *eip); // 中断结束 继续执行
 
   print_asm("int %s", id_dest->str);
 
@@ -82,8 +89,9 @@ void pio_write(ioaddr_t, int, uint32_t);
 
 // in ： 从端口读取数据到通用寄存器
 make_EHelper(in) {
-  // 端口输入操作，使用 pio_read 从指定的端口读取数据，并将结果存储到通用寄存器中
-  rtl_li(&t0, pio_read(id_src->val, id_dest->width));
+
+  rtl_andi(&t1, &id_src->val, 0xffff); // 端口号 低16位
+  rtl_li(&t0, pio_read(t1, id_dest->width)); // 从端口读取数据
   operand_write(id_dest, &t0);
 
   print_asm_template2(in);
@@ -95,7 +103,10 @@ make_EHelper(in) {
 
 // out ： 从通用寄存器写数据到端口
 make_EHelper(out) {
-  pio_write(id_dest->val, id_src->width, id_src->val);
+
+  rtl_andi(&t0, &id_dest->val, 0xffff); // 端口号 低16位
+  rtl_andi(&t1, &id_src->val, rtl_width_mask(id_src->width)); // 输出数据 按操作数宽度截断
+  pio_write(t0, id_src->width, t1); // 写数据到端口
 
   print_asm_template2(out);
 
