@@ -67,6 +67,7 @@ static inline void rtl_lm(rtlreg_t *dest, const rtlreg_t* addr, int len) {
   *dest = vaddr_read(*addr, len);
 }
 
+// 将 src1 的值存储到 addr 指向的内存位置，长度为 len 字节
 static inline void rtl_sm(rtlreg_t* addr, int len, const rtlreg_t* src1) {
   vaddr_write(*addr, len, *src1);
 }
@@ -118,11 +119,13 @@ static inline void rtl_sr(int r, int width, const rtlreg_t* src1) {
   }
 }
 
+// 按位生成mask
 static inline uint32_t rtl_width_mask(int width) {
   assert(width == 1 || width == 2 || width == 4);
   return width == 4 ? 0xffffffffu : ((1u << (width * 8)) - 1);
 }
 
+// 返回最高位的掩码
 static inline uint32_t rtl_sign_mask(int width) {
   assert(width == 1 || width == 2 || width == 4);
   return 1u << (width * 8 - 1);
@@ -213,17 +216,14 @@ static inline void rtl_msb(rtlreg_t* dest, const rtlreg_t* src1, int width) {
   // dest <- src1[width * 8 - 1]
   // TODO(finfished)
   assert(width == 1 || width == 2 || width == 4);
-  *dest = (*src1 >> (width * 8 - 1)) & 0x1;
+  *dest = (*src1 & rtl_sign_mask(width)) ? 1 : 0; // 直接使用符号位掩码来判断最高位是否为1
 }
 
 // ZF：零标志位，表示结果是否为0
 static inline void rtl_update_ZF(const rtlreg_t* result, int width) {
   // eflags.ZF <- is_zero(result[width * 8 - 1 .. 0])
   assert(width == 1 || width == 2 || width == 4);
-  // if (width == 1) masked = *result & 0xFF;
-  // else if (width == 2) masked = *result & 0xFFFF;
-  // else masked = *result;
-  rtlreg_t masked = *result & (~0u >> ((4 - width) << 3));
+  rtlreg_t masked = *result & rtl_width_mask(width);
   cpu.ZF = (masked == 0);
 }
 
@@ -231,7 +231,7 @@ static inline void rtl_update_ZF(const rtlreg_t* result, int width) {
 static inline void rtl_update_SF(const rtlreg_t* result, int width) {
   // eflags.SF <- is_sign(result[width * 8 - 1 .. 0])
   assert(width == 1 || width == 2 || width == 4);
-  cpu.SF = (*result >> (width * 8 - 1)) & 0x1;
+  cpu.SF = (*result & rtl_sign_mask(width)) ? 1 : 0;
 }
 
 static inline void rtl_update_ZFSF(const rtlreg_t* result, int width) {
