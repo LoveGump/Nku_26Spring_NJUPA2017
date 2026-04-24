@@ -23,24 +23,24 @@ make_EHelper(pop) {
 
 // pusha 一次性将所有通用寄存器的值压入栈中，顺序是 eax, ecx, edx, ebx, esp, ebp, esi, edi
 make_EHelper(pusha) {
-  rtl_mv(&t0, &cpu.eax);
+  rtl_lr_l(&t0, R_EAX);
   rtl_push(&t0);
-  rtl_mv(&t0, &cpu.ecx);
+  rtl_lr_l(&t0, R_ECX);
   rtl_push(&t0);
-  rtl_mv(&t0, &cpu.edx);
+  rtl_lr_l(&t0, R_EDX);
   rtl_push(&t0);
-  rtl_mv(&t0, &cpu.ebx);
+  rtl_lr_l(&t0, R_EBX);
   rtl_push(&t0);
 
-  rtl_mv(&t0, &cpu.esp);
+  rtl_lr_l(&t0, R_ESP);
   rtl_addi(&t0, &t0, 16);
   rtl_push(&t0);
 
-  rtl_mv(&t0, &cpu.ebp);
+  rtl_lr_l(&t0, R_EBP);
   rtl_push(&t0);
-  rtl_mv(&t0, &cpu.esi);
+  rtl_lr_l(&t0, R_ESI);
   rtl_push(&t0);
-  rtl_mv(&t0, &cpu.edi);
+  rtl_lr_l(&t0, R_EDI);
   rtl_push(&t0);
 
   print_asm("pusha");
