@@ -1,49 +1,59 @@
 #include "cpu/exec.h"
 
 make_EHelper(add) {
-  // 先获取mask
-  uint32_t mask = rtl_width_mask(id_dest->width); 
-  uint32_t dest = id_dest->val & mask;  // dest
-  uint32_t src = id_src->val & mask;      // src
-  uint64_t sum = (uint64_t)dest + (uint64_t)src; // 计算结果，使用64位来避免溢出
+  uint32_t mask = rtl_width_mask(id_dest->width);
 
-  t2 = sum & mask; // 截断结果到操作数的宽度
-  // 将结果写回目的操作数
-  operand_write(id_dest, &t2); 
-  // 更新零标志位和符号标志位
-  rtl_update_ZFSF(&t2, id_dest->width); 
+  // 先按操作数宽度截断，再基于截断后的值计算结果和标志位。
+  rtl_andi(&t0, &id_dest->val, mask);
+  rtl_andi(&t1, &id_src->val, mask);
 
-  // 计算进位标志位，只有当结果超过了操作数的最大值时才会产生进位
-  t0 = (sum >> (id_dest->width * 8)) & 0x1;
-  rtl_set_CF(&t0);
+  rtl_add(&t2, &t0, &t1); // t2 = t0 + t1
+  rtl_andi(&t2, &t2, mask);
+  operand_write(id_dest, &t2);
+  rtl_update_ZFSF(&t2, id_dest->width);
 
-  // 计算溢出标志位，只有当两个操作数符号相同但结果符号不同的时候才会产生溢出
-  t0 = ((~(dest ^ src)) & (dest ^ t2) & rtl_sign_mask(id_dest->width)) ? 1 : 0;
-  rtl_set_OF(&t0);
+  // 无符号进位：截断后的结果小于任一加数时产生进位。
+  rtl_sltu(&t3, &t2, &t0);
+  rtl_set_CF(&t3);
+
+  // 有符号溢出：两输入同号，但结果与输入异号。
+  rtl_xor(&t3, &t0, &t1); // t3 = t0 ^ t1
+  rtl_not(&t3);                      // t3 = ~(t0 ^ t1) t0 和 t1 同号
+  rtl_xor(&t1, &t0, &t2); // t1 = t0 ^ t2    t0 和 t2 异号
+  rtl_and(&t3, &t3, &t1); 
+  rtl_msb(&t3, &t3, id_dest->width); // 获得 最高位 作为 OF 标志
+  rtl_set_OF(&t3);
 
   print_asm_template2(add);
 }
 
-// sub 的实现和 add 类似，只不过是计算 dest - src 而不是 dest + src
+// sub 的实现和 add 类似
 make_EHelper(sub) {
   uint32_t mask = rtl_width_mask(id_dest->width);
-  uint32_t dest = id_dest->val & mask;
-  uint32_t src = id_src->val & mask;
 
-  t2 = (dest - src) & mask;
+  rtl_andi(&t0, &id_dest->val, mask);
+  rtl_andi(&t1, &id_src->val, mask);
+
+  rtl_sub(&t2, &t0, &t1);
+  rtl_andi(&t2, &t2, mask);
   operand_write(id_dest, &t2);
   rtl_update_ZFSF(&t2, id_dest->width);
 
-  t0 = dest < src;
-  rtl_set_CF(&t0);
+  // 无符号借位：当被减数小于减数时，CF 置 1。
+  rtl_sltu(&t3, &t0, &t1);
+  rtl_set_CF(&t3);
 
-  t0 = (((dest ^ src) & (dest ^ t2) & rtl_sign_mask(id_dest->width)) != 0);
-  rtl_set_OF(&t0);
+  // 有符号溢出：两个输入异号，且结果与被减数异号。
+  rtl_xor(&t3, &t0, &t1);
+  rtl_xor(&t1, &t0, &t2);
+  rtl_and(&t3, &t3, &t1);
+  rtl_msb(&t3, &t3, id_dest->width);
+  rtl_set_OF(&t3);
 
   print_asm_template2(sub);
 }
 
-// cmp 的实现和 sub 类似，只不过不需要写回结果到目的操作数
+// cmp 只关心结果的标志位，不写回结果
 make_EHelper(cmp) {
   uint32_t mask = rtl_width_mask(id_dest->width);
   uint32_t dest = id_dest->val & mask;
@@ -55,13 +65,13 @@ make_EHelper(cmp) {
   t0 = dest < src;
   rtl_set_CF(&t0);
 
-  t0 = (((dest ^ src) & (dest ^ t2) & rtl_sign_mask(id_dest->width)) != 0);
+  t0 = ((dest ^ src) & (dest ^ t2) & rtl_sign_mask(id_dest->width)) ? 1 : 0;
   rtl_set_OF(&t0);
 
   print_asm_template2(cmp);
 }
 
-// inc 是 自增1
+// inc 是 自增1 ，不更改 CF 标志
 make_EHelper(inc) {
   uint32_t mask = rtl_width_mask(id_dest->width);
   uint32_t dest = id_dest->val & mask;
@@ -72,13 +82,14 @@ make_EHelper(inc) {
   operand_write(id_dest, &t2);
   rtl_update_ZFSF(&t2, id_dest->width);
 
-  t0 = (((~dest) & t2 & rtl_sign_mask(id_dest->width)) != 0);
+  t0 = ((~dest) & t2 & rtl_sign_mask(id_dest->width)) ? 1 : 0;
   rtl_set_OF(&t0);
   rtl_set_CF(&t3);
 
   print_asm_template1(inc);
 }
 
+// dec 
 make_EHelper(dec) {
   uint32_t mask = rtl_width_mask(id_dest->width);
   uint32_t dest = id_dest->val & mask;
@@ -89,7 +100,7 @@ make_EHelper(dec) {
   operand_write(id_dest, &t2);
   rtl_update_ZFSF(&t2, id_dest->width);
 
-  t0 = ((dest & (~t2) & rtl_sign_mask(id_dest->width)) != 0);
+  t0 = (dest & (~t2) & rtl_sign_mask(id_dest->width)) ? 1 : 0;
   rtl_set_OF(&t0);
   rtl_set_CF(&t3);
 
@@ -105,9 +116,11 @@ make_EHelper(neg) {
   operand_write(id_dest, &t2);
   rtl_update_ZFSF(&t2, id_dest->width);
 
+  // 设置 CF 标志：当 dest 不为0时才会产生进位（相当于从0借1来做 neg）
   t0 = (dest != 0);
   rtl_set_CF(&t0);
 
+  // 设置 OF 标志：当 dest 是最小的负数时，取反加一会得到相同的数，产生溢出
   t0 = (dest == rtl_sign_mask(id_dest->width));
   rtl_set_OF(&t0);
 
@@ -219,7 +232,7 @@ make_EHelper(imul1) {
     case 4:
       rtl_sr_l(R_EAX, &t1); // EAX 存低位
       rtl_sr_l(R_EDX, &t0); // EDX 存高位
-// 1. 获取低位结果的符号扩展（全 0 或全 1）
+      // 1. 获取低位结果的符号扩展（全 0 或全 1）
       rtl_sari(&t2, &t1, 31); 
       
       // 2. 比较高位 (t0) 和符号扩展 (t2) 是否相等
