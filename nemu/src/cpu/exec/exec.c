@@ -26,8 +26,7 @@ static inline void set_width(int width) {
 // 指令解码和执行
 static inline void idex(vaddr_t *eip, opcode_entry *e) {
   /* eip is pointing to the byte next to opcode */
-  // eip 指向操作码的下一个字节
-  // 执行指令的解码函数和执行函数
+  // 调用解码函数来解码指令，填充 decoding 结构体中的 src、dest、src2 等信息
   if (e->decode)
     e->decode(eip);
   e->execute(eip);
@@ -229,6 +228,8 @@ make_EHelper(real) {
   // 根据操作码从opcode_table中取出对应的指令信息，
   // 设置操作数宽度，并调用指令解码和执行函数
   set_width(opcode_table[opcode].width);
+
+  // 调用 idex() 来解码和执行指令，传入 eip 和 opcode_table 中对应的指令信息
   idex(eip, &opcode_table[opcode]);
 }
 

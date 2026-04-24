@@ -35,6 +35,7 @@ typedef struct {
 
   vaddr_t eip;
 
+  // todo(finfished): 添加 EFLAGS 寄存器的定义
   union {
     struct {
       uint32_t CF       : 1;

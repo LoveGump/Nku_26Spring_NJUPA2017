@@ -10,7 +10,7 @@ rtlreg_t t0, t1, t2, t3;
 // 0 寄存器 只能读 不能写
 const rtlreg_t tzero = 0; 
 
-// 参数分别为 eip 操作数 是否加载操作数的值
+// 参数分别为 eip 操作数 是否将操作数的值加载到 decoding 中供后续使用
 #define make_DopHelper(name) void concat(decode_op_, name) (vaddr_t *eip, Operand *op, bool load_val)
 
 /* Refer to Appendix A in i386 manual for the explanations of these abbreviations */
@@ -38,21 +38,17 @@ static inline make_DopHelper(I) {
  * function to decode it.
  */
 /* sign immediate */
-// si 表示有符号立即数
 static inline make_DopHelper(SI) {
   assert(op->width == 1 || op->width == 4);
 
   op->type = OP_TYPE_IMM;
 
-  /* TODO: Use instr_fetch() to read `op->width' bytes of memory
+  /* TODO(finished): Use instr_fetch() to read `op->width' bytes of memory
    * pointed by `eip'. Interpret the result as a signed immediate,
    * and assign it to op->simm.
-   *
-   op->simm = ???
+   * op->simm = ???
    */
-
   // 使用 instr_fetch() 从内存中读取 op->width 字节的立即数
-  // 
   if (op->width == 1) {
     // 这里我们使用 int8_t 来读取 1 字节的立即数，并将其符号扩展为 32 位
     // 隐式类型转换
