@@ -170,7 +170,7 @@ static inline void rtl_sext(rtlreg_t* dest, const rtlreg_t* src1, int width) {
 }
 
 // push ：将 src1 的值压入栈中，更新 esp 的值
-static void rtl_push(const rtlreg_t* src1) {
+void rtl_push(const rtlreg_t* src1) {
   // esp <- esp - 4
   // M[esp] <- src1
   // TODO(finfished)
