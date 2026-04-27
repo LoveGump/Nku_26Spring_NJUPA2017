@@ -27,6 +27,7 @@ make_EHelper(setcc);
 make_EHelper(not);
 
 make_EHelper(mov);
+make_EHelper(movs);
 make_EHelper(push);
 make_EHelper(pop);
 make_EHelper(pusha);

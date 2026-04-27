@@ -5,6 +5,20 @@ make_EHelper(mov) {
   print_asm_template2(mov);
 }
 
+// movs{b,w,l}: copy memory from [esi] to [edi], then advance esi/edi.
+make_EHelper(movs) {
+  rtl_lr_l(&t0, R_ESI);
+  rtl_lr_l(&t1, R_EDI);
+  rtl_lm(&t2, &t0, id_dest->width);
+  rtl_sm(&t1, id_dest->width, &t2);
+  rtl_addi(&t0, &t0, id_dest->width);
+  rtl_addi(&t1, &t1, id_dest->width);
+  rtl_sr_l(R_ESI, &t0);
+  rtl_sr_l(R_EDI, &t1);
+
+  print_asm("movs%c %%ds:(%%esi),%%es:(%%edi)", suffix_char(id_dest->width));
+}
+
 // push
 make_EHelper(push) {
   rtl_push(&id_dest->val);
