@@ -19,6 +19,7 @@ extern FILE* log_fp;
 #	define Log_write(format, ...)
 #endif
 
+// log ：输出调试信息，格式为：文件名、行号、函数名、用户自定义信息
 #define Log(format, ...) \
   do { \
     fprintf(stdout, "\33[1;34m[%s,%d,%s] " format "\33[0m\n", \
@@ -28,6 +29,7 @@ extern FILE* log_fp;
         __FILE__, __LINE__, __func__, ## __VA_ARGS__); \
   } while (0)
 
+  // false 则 输出用户自定义信息，并且断言失败
 #define Assert(cond, ...) \
   do { \
     if (!(cond)) { \
@@ -39,6 +41,7 @@ extern FILE* log_fp;
     } \
   } while (0)
 
+  // 无条件的输出用户自定义信息，并且断言失败
 #define panic(format, ...) \
   Assert(0, format, ## __VA_ARGS__)
 

@@ -7,6 +7,8 @@ typedef struct watchpoint {
   int NO;                 // watchpoint编号
   struct watchpoint *next;
 
+  /* TODO(finished): Add more members if necessary */
+
   char expr[128];         // watchpoint表达式
   uint32_t old_val;       // 上一次的值
 
