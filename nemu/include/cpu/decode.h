@@ -5,21 +5,23 @@
 
 #include "rtl.h"
 
+// 操作数类型：寄存器、内存、立即数
 enum { OP_TYPE_REG, OP_TYPE_MEM, OP_TYPE_IMM };
 
+// str 的 长度
 #define OP_STR_SIZE 40
 
 typedef struct {
   uint32_t type;  // 操作数类型：寄存器、内存、立即数
   int width;      // 操作数宽度：1、2、4字节
   union {
-    uint32_t reg;
-    rtlreg_t addr;
-    uint32_t imm;
-    int32_t simm;
-  };              
-  rtlreg_t val;   // 操作数的值：寄存器值、内存值、立即数值
-  char str[OP_STR_SIZE];    // 操作数的字符串表示，用于调试输出
+    uint32_t reg;   // 寄存器编号
+    rtlreg_t addr;  // 内存地址
+    uint32_t imm;   // 立即数值
+    int32_t simm;   // 有符号立即数
+  };         
+  rtlreg_t val;   // 操作数的实际值
+  char str[OP_STR_SIZE];    // 操作数的字符串名字，用于调试输出
 } Operand;
 
 typedef struct {
@@ -39,25 +41,25 @@ typedef struct {
 
 typedef union {
   struct {
-    uint8_t R_M		:3;
-    uint8_t reg		:3;
-    uint8_t mod		:2;
+    uint8_t R_M		:3; // r/m 字段编码的寄存器编号或内存寻址方式
+    uint8_t reg		:3; // reg 字段编码的寄存器编号
+    uint8_t mod		:2; // mod 字段编码的寻址方式
   };
   struct {
-    uint8_t dont_care	:3;
-    uint8_t opcode		:3;
+    uint8_t dont_care	:3;// 低 3 位不关心
+    uint8_t opcode		:3;// 扩展操作码：当 opcode 字段为 0 时，表示指令的真正操作码在后续字节中
   };
-  uint8_t val;
-} ModR_M;
+  uint8_t val; // 对应的8位值
+} ModR_M; // modR/M 字节的格式
 
 typedef union {
   struct {
-    uint8_t base	:3;
-    uint8_t index	:3;
-    uint8_t ss		:2;
+    uint8_t base	:3; // base 字段编码的基址寄存器编号
+    uint8_t index	:3; // index 字段编码的变址寄存器编号
+    uint8_t ss		:2; // ss 字段编码的比例因子，00 01 10 分别表示 1、2、4
   };
   uint8_t val;
-} SIB;
+} SIB;// SIB(Scale - Index - Base) 字节的格式 有效地址为 base + index * (1 << ss) + disp
 
 void load_addr(vaddr_t *, ModR_M *, Operand *);
 void read_ModR_M(vaddr_t *, Operand *, bool, Operand *, bool);
@@ -67,9 +69,12 @@ void operand_write(Operand *, rtlreg_t *);
 /* shared by all helper functions */
 extern DecodeInfo decoding;
 
+// id_src、id_dest、id_src2 全局编码信息 decoding 中的 src、dest、src2 
 #define id_src (&decoding.src)
 #define id_src2 (&decoding.src2)
 #define id_dest (&decoding.dest)
+
+// 构建 decode 辅助函数
 
 #define make_DHelper(name) void concat(decode_, name) (vaddr_t *eip)
 typedef void (*DHelper) (vaddr_t *);

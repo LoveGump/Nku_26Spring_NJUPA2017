@@ -3,20 +3,26 @@
 
 #include "nemu.h"
 
+// 定义一个执行阶段相关的 helper 函数 函数都带有一个参数 eip.NEMU 通过不同的 helper
+// 函数来模拟不同的步骤.
 #define make_EHelper(name) void concat(exec_, name) (vaddr_t *eip)
 typedef void (*EHelper) (vaddr_t *);
 
 #include "cpu/decode.h"
 
+// 从内存中读取指令，长度为len字节，返回指令的值
+// eip指向len字节之后的位置
 static inline uint32_t instr_fetch(vaddr_t *eip, int len) {
   uint32_t instr = vaddr_read(*eip, len);
 #ifdef DEBUG
+  // 打印指令的字节流，供调试使用
   uint8_t *p_instr = (void *)&instr;
   int i;
   for (i = 0; i < len; i ++) {
     decoding.p += sprintf(decoding.p, "%02x ", p_instr[i]);
   }
 #endif
+  // 更新eip，指向下一条指令的地址
   (*eip) += len;
   return instr;
 }

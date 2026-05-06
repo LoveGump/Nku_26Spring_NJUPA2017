@@ -51,9 +51,11 @@ static inline int load_default_img() {
   return sizeof(img);
 }
 
+// 加载镜像
 static inline void load_img() {
   long size;
   if (img_file == NULL) {
+    // 默认程序
     size = load_default_img();
   }
   else {
@@ -82,6 +84,7 @@ static inline void load_img() {
 static inline void restart() {
   /* Set the initial instruction pointer. */
   cpu.eip = ENTRY_START;
+  cpu.eflags = 0x00000002;
 
 #ifdef DIFF_TEST
   init_qemu_reg();
@@ -117,6 +120,7 @@ int init_monitor(int argc, char *argv[]) {
   init_log();
 
   /* Test the implementation of the `CPU_state' structure. */
+  // 测试 CPU_state 结构体的实现，确保寄存器的值能够正确地存储和访问
   reg_test();
 
 #ifdef DIFF_TEST

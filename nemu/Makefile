@@ -16,6 +16,9 @@ CFLAGS   += -O2 -MMD -Wall -Werror -ggdb $(INCLUDES)
 
 # Files to be compiled
 SRCS = $(shell find src/ -name "*.c")
+CODE_FILES = $(shell find src/ include/ -type f \( -name "*.c" -o -name "*.h" \))
+COUNT_BASE ?= pa0
+COUNT_REF ?= HEAD
 OBJS = $(SRCS:src/%.c=$(OBJ_DIR)/%.o)
 
 # Compilation patterns
@@ -38,7 +41,7 @@ ARGS ?= -l $(BUILD_DIR)/nemu-log.txt
 NEMU_EXEC := $(BINARY) $(ARGS)
 
 # Use `make count BASE_BRANCH=origin/2017` if your framework baseline is `origin/2017`.
-BASE_BRANCH ?= pa0
+BASE_BRANCH ?= pa1
 COUNT_FILE_EXPR = find . -type f \( -name "*.c" -o -name "*.h" \)
 
 $(BINARY): $(OBJS)
