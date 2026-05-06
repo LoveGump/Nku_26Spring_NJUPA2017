@@ -5,7 +5,7 @@ void raise_intr(uint8_t NO, vaddr_t ret_addr) {
   /* TODO(finished): Trigger an interrupt/exception with ``NO''.
    * That is, use ``NO'' to index the IDT.
    */
-
+  
   // 从 IDT 中获取中断门描述符
   uint32_t gate_addr = cpu.idtr.base + (NO << 3);
   // 获取中断处理程序的地址
