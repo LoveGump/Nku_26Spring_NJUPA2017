@@ -219,3 +219,21 @@ make_EHelper(not) {
 
   print_asm_template1(not);
 }
+
+make_EHelper(bsr) {
+  rtl_andi(&t0, &id_src->val, rtl_width_mask(id_src->width));
+  if (t0 == 0) {
+    rtl_li(&t1, 1);
+    rtl_set_ZF(&t1);
+  } else {
+    rtl_set_ZF(&tzero);
+    int bit = id_src->width * 8 - 1;
+    while (((t0 >> bit) & 1) == 0) {
+      bit --;
+    }
+    rtl_li(&t1, bit);
+    operand_write(id_dest, &t1);
+  }
+
+  print_asm_template2(bsr);
+}
