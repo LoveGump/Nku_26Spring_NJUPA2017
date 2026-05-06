@@ -40,6 +40,7 @@ int fs_open(const char *pathname, int flags, int mode) {
     }
   }
 
+  assert(0);
   return -1;
 }
 
