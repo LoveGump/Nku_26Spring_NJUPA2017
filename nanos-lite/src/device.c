@@ -8,8 +8,28 @@ static const char *keyname[256] __attribute__((used)) = {
   _KEYS(NAME)
 };
 
+#define KEYDOWN_MASK 0x8000
+
 size_t events_read(void *buf, size_t len) {
-  return 0;
+  char event[64];
+  int key = _read_key();
+
+  if (key != _KEY_NONE) {
+    bool down = (key & KEYDOWN_MASK) != 0;
+    key &= ~KEYDOWN_MASK;
+    assert(key > _KEY_NONE && key < 256 && keyname[key] != NULL);
+    snprintf(event, sizeof(event), "%s %s\n",
+        down ? "kd" : "ku", keyname[key]);
+  } else {
+    snprintf(event, sizeof(event), "t %u\n", (unsigned)_uptime());
+  }
+
+  size_t event_len = strlen(event);
+  if (event_len > len) {
+    event_len = len;
+  }
+  memcpy(buf, event, event_len);
+  return event_len;
 }
 
 static char dispinfo[128] __attribute__((used));
