@@ -25,6 +25,7 @@ make_EHelper(shr);
 make_EHelper(rol);
 make_EHelper(setcc);
 make_EHelper(not);
+make_EHelper(bsr);
 
 make_EHelper(mov);
 make_EHelper(movs);
