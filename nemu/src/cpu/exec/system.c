@@ -64,6 +64,7 @@ make_EHelper(int) {
   rtl_andi(&t0, &id_dest->val, 0xff); // 记录中断号，取低8位
   raise_intr(t0, *eip); // 中断结束 继续执行
 
+  
   print_asm("int %s", id_dest->str);
 
 #ifdef DIFF_TEST
