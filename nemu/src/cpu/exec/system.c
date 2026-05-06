@@ -74,8 +74,9 @@ make_EHelper(int) {
 // iret ： 执行一个中断返回指令，恢复之前压栈的 EIP、CS 和 EFLAGS
 make_EHelper(iret) {
   rtl_pop(&t0); // pop EIP
-  rtl_pop(&t1); // pop CS, ignored in NEMU
+  rtl_pop(&t1); // pop CS
   rtl_pop(&t2); // pop EFLAGS
+  cpu.cs = t1 & 0xffff;
   cpu.eflags = t2;
 
   // 设置 jmp_eip 和 is_jmp 标志，告诉 CPU 需要跳转到新的 EIP
