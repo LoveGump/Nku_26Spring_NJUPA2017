@@ -37,48 +37,48 @@ make_EHelper(pop) {
 
 // pusha 一次性将所有通用寄存器的值压入栈中，顺序是 eax, ecx, edx, ebx, esp, ebp, esi, edi
 make_EHelper(pusha) {
-  // rtl_lr_l(&t0, R_EAX);
-  // rtl_push(&t0);
-  // rtl_lr_l(&t0, R_ECX);
-  // rtl_push(&t0);
-  // rtl_lr_l(&t0, R_EDX);
-  // rtl_push(&t0);
-  // rtl_lr_l(&t0, R_EBX);
-  // rtl_push(&t0);
+  rtl_lr_l(&t0, R_EAX);
+  rtl_push(&t0);
+  rtl_lr_l(&t0, R_ECX);
+  rtl_push(&t0);
+  rtl_lr_l(&t0, R_EDX);
+  rtl_push(&t0);
+  rtl_lr_l(&t0, R_EBX);
+  rtl_push(&t0);
 
-  // rtl_lr_l(&t0, R_ESP);
-  // rtl_addi(&t0, &t0, 16);
-  // rtl_push(&t0);
+  rtl_lr_l(&t0, R_ESP);
+  rtl_addi(&t0, &t0, 16);
+  rtl_push(&t0);
 
-  // rtl_lr_l(&t0, R_EBP);
-  // rtl_push(&t0);
-  // rtl_lr_l(&t0, R_ESI);
-  // rtl_push(&t0);
-  // rtl_lr_l(&t0, R_EDI);
-  // rtl_push(&t0);
+  rtl_lr_l(&t0, R_EBP);
+  rtl_push(&t0);
+  rtl_lr_l(&t0, R_ESI);
+  rtl_push(&t0);
+  rtl_lr_l(&t0, R_EDI);
+  rtl_push(&t0);
 
-  // print_asm("pusha");
+  print_asm("pusha");
 }
 
 // popa 一次性将栈顶的值弹出到所有通用寄存器中，顺序是 edi, esi, ebp, esp, ebx, edx, ecx, eax
 make_EHelper(popa) {
-  // rtl_pop(&t0);
-  // rtl_sr_l(R_EDI, &t0);
-  // rtl_pop(&t0);
-  // rtl_sr_l(R_ESI, &t0);
-  // rtl_pop(&t0);
-  // rtl_sr_l(R_EBP, &t0);
-  // rtl_pop(&t0);
-  // rtl_pop(&t0);
-  // rtl_sr_l(R_EBX, &t0);
-  // rtl_pop(&t0);
-  // rtl_sr_l(R_EDX, &t0);
-  // rtl_pop(&t0);
-  // rtl_sr_l(R_ECX, &t0);
-  // rtl_pop(&t0);
-  // rtl_sr_l(R_EAX, &t0);
+  rtl_pop(&t0);
+  rtl_sr_l(R_EDI, &t0);
+  rtl_pop(&t0);
+  rtl_sr_l(R_ESI, &t0);
+  rtl_pop(&t0);
+  rtl_sr_l(R_EBP, &t0);
+  rtl_pop(&t0);
+  rtl_pop(&t0);
+  rtl_sr_l(R_EBX, &t0);
+  rtl_pop(&t0);
+  rtl_sr_l(R_EDX, &t0);
+  rtl_pop(&t0);
+  rtl_sr_l(R_ECX, &t0);
+  rtl_pop(&t0);
+  rtl_sr_l(R_EAX, &t0);
 
-  // print_asm("popa");
+  print_asm("popa");
 }
 
 // leave 指令用于函数返回，等价于 mov esp, ebp; pop ebp
