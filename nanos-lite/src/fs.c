@@ -23,6 +23,7 @@ static Finfo file_table[] __attribute__((used)) = {
 #define NR_FILES (sizeof(file_table) / sizeof(file_table[0]))
 
 void ramdisk_read(void *buf, off_t offset, size_t len);
+void ramdisk_write(const void *buf, off_t offset, size_t len);
 
 int fs_open(const char *pathname, int flags, int mode) {
   (void)flags;
@@ -50,6 +51,36 @@ size_t fs_read(int fd, void *buf, size_t len) {
   ramdisk_read(buf, file->disk_offset + file->open_offset, len);
   file->open_offset += len;
   return len;
+}
+
+size_t fs_write(int fd, const void *buf, size_t len) {
+  assert(fd >= 0 && fd < NR_FILES);
+
+  Finfo *file = &file_table[fd];
+  if (file->open_offset + len > file->size) {
+    len = file->size - file->open_offset;
+  }
+
+  ramdisk_write(buf, file->disk_offset + file->open_offset, len);
+  file->open_offset += len;
+  return len;
+}
+
+off_t fs_lseek(int fd, off_t offset, int whence) {
+  assert(fd >= 0 && fd < NR_FILES);
+
+  Finfo *file = &file_table[fd];
+  off_t new_offset = 0;
+  switch (whence) {
+    case SEEK_SET: new_offset = offset; break;
+    case SEEK_CUR: new_offset = file->open_offset + offset; break;
+    case SEEK_END: new_offset = file->size + offset; break;
+    default: assert(0);
+  }
+
+  assert(new_offset >= 0 && new_offset <= file->size);
+  file->open_offset = new_offset;
+  return new_offset;
 }
 
 int fs_close(int fd) {
