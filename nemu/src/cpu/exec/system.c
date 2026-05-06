@@ -9,6 +9,7 @@ void raise_intr(uint8_t NO, vaddr_t ret_addr);
 
 // lidt ： 从内存中加载 IDTR 寄存器
 make_EHelper(lidt) {
+  
   // 在 x86 里，LIDT 是 Load IDTR 指令，
   // 用来把内存中的 6 字节描述符加载到 IDTR（中断描述符表寄存器）
 
