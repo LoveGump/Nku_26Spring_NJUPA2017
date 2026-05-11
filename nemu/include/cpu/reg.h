@@ -60,6 +60,8 @@ typedef struct {
   // CR0 和 CR3 寄存器
   CR0 cr0;
   CR3 cr3;
+
+  bool INTR; // 中断标志位
 } CPU_state;
 
 extern CPU_state cpu;

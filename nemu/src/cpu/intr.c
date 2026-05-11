@@ -26,8 +26,5 @@ void raise_intr(uint8_t NO, vaddr_t ret_addr) {
 
 // dev_raise_intr : 设备触发中断的函数，通常在设备模拟中调用
 void dev_raise_intr() {
-  // 如果 IF 标志位被设置，说明 CPU 允许响应中断，此时触发一个中断（例如，0x20 是时钟中断）
-  if (cpu.IF) {
-    raise_intr(0x20, cpu.eip);
-  }
+  cpu.INTR = true; // 设置中断标志位，表示有中断请求
 }

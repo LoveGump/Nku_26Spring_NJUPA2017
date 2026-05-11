@@ -88,6 +88,7 @@ static inline void restart() {
   cpu.eflags = 0x00000002;
   cpu.cr0.val = 0x60000011;
   cpu.cr3.val = 0;
+  cpu.INTR = false; // 关闭中断
 
 #ifdef DIFF_TEST
   init_qemu_reg();
