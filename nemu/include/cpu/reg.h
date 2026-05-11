@@ -51,14 +51,15 @@ typedef struct {
     };
     rtlreg_t eflags;
   };
-  // CR0 和 CR3 寄存器
-  CR0 cr0;
-  CR3 cr3;
+
   struct {
     uint16_t limit; // 长度
     paddr_t base;   // 首地址
   } idtr; // IDTR 寄存器
 
+  // CR0 和 CR3 寄存器
+  CR0 cr0;
+  CR3 cr3;
 } CPU_state;
 
 extern CPU_state cpu;

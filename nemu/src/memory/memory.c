@@ -31,10 +31,52 @@ void paddr_write(paddr_t addr, int len, uint32_t data) {
   memcpy(guest_to_host(addr), &data, len);
 }
 
+// 虚拟地址 -> 物理地址
+static paddr_t page_translate(vaddr_t addr) {
+  uint32_t dir = (addr >> 22) & 0x3ff;
+  uint32_t page = (addr >> 12) & 0x3ff;
+  uint32_t offset = addr & PAGE_MASK;
+
+  // 获得页目录
+  paddr_t pdir_base = cpu.cr3.page_directory_base << 12;
+  PDE pde;  // 读取页目录项
+  pde.val = paddr_read(pdir_base + dir * sizeof(PDE), 4);
+  assert(pde.present);
+
+  // 获得页表
+  paddr_t ptab_base = pde.page_frame << 12;
+  PTE pte;
+  pte.val = paddr_read(ptab_base + page * sizeof(PTE), 4);
+  assert(pte.present);
+
+  return (pte.page_frame << 12) | offset;
+}
+
 uint32_t vaddr_read(vaddr_t addr, int len) {
-  return paddr_read(addr, len);
+  if (!cpu.cr0.paging) {
+    // 如果分页未启用，直接使用物理地址读写接口进行访问
+    return paddr_read(addr, len);
+  }
+
+  if ((addr & PAGE_MASK) + len > PAGE_SIZE) {
+    // 如果访问跨页了，暂时不支持，直接断言失败
+    assert(0);
+  }
+
+  paddr_t paddr = page_translate(addr);
+  return paddr_read(paddr, len);
 }
 
 void vaddr_write(vaddr_t addr, int len, uint32_t data) {
-  paddr_write(addr, len, data);
+  if (!cpu.cr0.paging) {
+    paddr_write(addr, len, data);
+    return;
+  }
+
+  if ((addr & PAGE_MASK) + len > PAGE_SIZE) {
+    assert(0);
+  }
+
+  paddr_t paddr = page_translate(addr);
+  paddr_write(paddr, len, data);
 }
