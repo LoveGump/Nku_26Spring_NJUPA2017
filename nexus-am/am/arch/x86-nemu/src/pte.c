@@ -69,7 +69,24 @@ void _switch(_Protect *p) {
   set_cr3(p->ptr);
 }
 
+// 虚拟地址空间中的地址 va 映射到物理地址 pa
 void _map(_Protect *p, void *va, void *pa) {
+  PDE *pdir = (PDE *)p->ptr;
+  uint32_t pdir_idx = PDX(va);
+  uint32_t ptab_idx = PTX(va);
+
+  // 如果页目录项无效，则分配一个新的页表，并将页目录项指向该页表
+  if ((pdir[pdir_idx] & PTE_P) == 0) {
+    PTE *ptab = (PTE *)palloc_f();
+    for (int i = 0; i < NR_PTE; i ++) {
+      ptab[i] = 0;
+    }
+    pdir[pdir_idx] = (uintptr_t)ptab | PTE_P | PTE_W | PTE_U;
+  }
+
+  // 将页表项设置为物理地址 pa，并设置 P 位、W 位和 U 位
+  PTE *ptab = (PTE *)PTE_ADDR(pdir[pdir_idx]);
+  ptab[ptab_idx] = PTE_ADDR(pa) | PTE_P | PTE_W | PTE_U;
 }
 
 void _unmap(_Protect *p, void *va) {
