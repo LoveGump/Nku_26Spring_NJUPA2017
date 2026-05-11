@@ -114,7 +114,7 @@ _RegSet *_umake(_Protect *p, _Area ustack, _Area kstack, void *entry, char *cons
   tf->error_code = 0;
   tf->eip = (uintptr_t)entry;
   tf->cs = KSEL(SEG_KCODE);
-  tf->eflags = 0x2;
+  tf->eflags = 0x2 | FL_IF; // IF = 1, enable interrupt
 
   return tf;
 }
