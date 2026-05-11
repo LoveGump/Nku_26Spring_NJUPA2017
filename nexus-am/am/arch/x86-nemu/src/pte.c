@@ -93,5 +93,28 @@ void _unmap(_Protect *p, void *va) {
 }
 
 _RegSet *_umake(_Protect *p, _Area ustack, _Area kstack, void *entry, char *const argv[], char *const envp[]) {
-  return NULL;
+  (void)p;
+  (void)kstack;
+  (void)argv;
+  (void)envp;
+
+  // 更新栈顶指针，构建用户栈
+  uintptr_t *sp = (uintptr_t *)ustack.end;
+  *(--sp) = 0;  // envp
+  *(--sp) = 0;  // argv
+  *(--sp) = 0;  // argc
+  *(--sp) = 0;  // return address, never used
+
+  // 构建 trap frame
+  _RegSet *tf = (_RegSet *)((uintptr_t)sp - sizeof(_RegSet));
+  tf->edi = tf->esi = tf->ebp = 0;
+  tf->esp = (uintptr_t)sp;
+  tf->ebx = tf->edx = tf->ecx = tf->eax = 0;
+  tf->irq = 0;
+  tf->error_code = 0;
+  tf->eip = (uintptr_t)entry;
+  tf->cs = KSEL(SEG_KCODE);
+  tf->eflags = 0x2;
+
+  return tf;
 }
