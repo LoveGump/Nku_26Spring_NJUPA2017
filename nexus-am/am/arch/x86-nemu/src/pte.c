@@ -13,6 +13,7 @@ _Area segments[] = {      // Kernel memory mappings
 
 #define NR_KSEG_MAP (sizeof(segments) / sizeof(segments[0]))
 
+// 传入两个函数指针，分别用于分配和释放页框
 void _pte_init(void* (*palloc)(), void (*pfree)(void*)) {
   palloc_f = palloc;
   pfree_f = pfree;
@@ -20,22 +21,25 @@ void _pte_init(void* (*palloc)(), void (*pfree)(void*)) {
   int i;
 
   // make all PDEs invalid
+  // 清空内核页目录
   for (i = 0; i < NR_PDE; i ++) {
     kpdirs[i] = 0;
   }
 
+  // 重新分配 页表
   PTE *ptab = kptabs;
   for (i = 0; i < NR_KSEG_MAP; i ++) {
     uint32_t pdir_idx = (uintptr_t)segments[i].start / (PGSIZE * NR_PTE);
     uint32_t pdir_idx_end = (uintptr_t)segments[i].end / (PGSIZE * NR_PTE);
     for (; pdir_idx < pdir_idx_end; pdir_idx ++) {
-      // fill PDE
+      // fill PDE 只有 P 位
       kpdirs[pdir_idx] = (uintptr_t)ptab | PTE_P;
 
       // fill PTE
       PTE pte = PGADDR(pdir_idx, 0, 0) | PTE_P;
       PTE pte_end = PGADDR(pdir_idx + 1, 0, 0) | PTE_P;
       for (; pte < pte_end; pte += PGSIZE) {
+        // 填充页表项，恒等映射
         *ptab = pte;
         ptab ++;
       }

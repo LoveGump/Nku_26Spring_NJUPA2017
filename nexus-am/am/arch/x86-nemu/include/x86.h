@@ -65,6 +65,7 @@ typedef uint32_t PDE;
 #define OFF(va)     ((uint32_t)(va) & 0xfff)
 
 // construct virtual address from indexes and offset
+// 构建虚拟地址
 #define PGADDR(d, t, o) ((uint32_t)((d) << PDXSHFT | (t) << PTXSHFT | (o)))
 
 // Address in page table or page directory entry
