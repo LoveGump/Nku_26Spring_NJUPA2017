@@ -27,13 +27,11 @@ void load_prog(const char *filename) {
 }
 
 _RegSet* schedule(_RegSet *prev) {
-  // 简单的轮转调度算法
   if (current != NULL) {
     current->tf = prev;
   }
 
-  // 切换到下一个进程
-  current = &pcb[0];
+  current = (current == &pcb[0] ? &pcb[1] : &pcb[0]);
   _switch(&current->as);
   return current->tf;
 }
