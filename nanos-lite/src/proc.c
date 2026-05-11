@@ -1,9 +1,11 @@
 #include "proc.h"
 
 #define MAX_NR_PROC 4
+#define PAL_SCHEDULE_WEIGHT 256
 
 static PCB pcb[MAX_NR_PROC];
 static int nr_proc = 0;
+static int pal_count = 0;
 PCB *current = NULL;
 
 uintptr_t loader(_Protect *as, const char *filename);
@@ -31,7 +33,15 @@ _RegSet* schedule(_RegSet *prev) {
     current->tf = prev;
   }
 
-  current = (current == &pcb[0] ? &pcb[1] : &pcb[0]);
+  if (current == &pcb[0] && pal_count >= PAL_SCHEDULE_WEIGHT) {
+    current = &pcb[1];
+    pal_count = 0;
+  }
+  else {
+    current = &pcb[0];
+    pal_count ++;
+  }
+
   _switch(&current->as);
   return current->tf;
 }
