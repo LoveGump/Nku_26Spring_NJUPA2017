@@ -113,13 +113,22 @@ static inline void restart() {
 
 \texttt{vaddr\_read()} 是所有虚拟地址读访问的统一入口。函数首先检查 \texttt{cpu.cr0.paging}：如果分页位没有打开，说明当前仍处于 PA3 式的直通内存模型，虚拟地址可以直接交给 \texttt{paddr\_read()} 读取。这样做可以保证开启分页前的 NEMU 启动、加载镜像和早期代码执行路径不受影响。
 
-如果分页已经开启，函数接着判断本次读取是否跨越页边界。判断条件是 \texttt{(addr \& PAGE\_MASK) + len > PAGE\_SIZE}，其中 \texttt{addr \& PAGE\_MASK} 表示页内偏移。如果页内偏移加读取长度超过 4KB，说明一次访问覆盖了两个虚拟页；当前阶段先用 \texttt{assert(0)} 暴露这种情况。非跨页时，函数调用 \texttt{page\_translate()} 得到物理地址，再复用 \texttt{paddr\_read()} 完成实际读取。
+最初实现时，我按照指导书中的提示将跨页读取暂时处理为 \texttt{assert(0)}。但在 Nanos-lite 开启分页并继续初始化时，真实执行路径很快触发了这个断言，如图 \ref{fig:pa4-wrong-vaddr-read} 所示。错误位置位于 \texttt{vaddr\_read()} 的跨页判断分支，说明当前访问的起始地址页内偏移加读取长度已经超过 4KB，需要真正支持跨页读。
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.92\textwidth]{stage1/wrong-vaddr_read.png}
+\caption{\texttt{vaddr\_read()} 暂不支持跨页读取时触发断言}
+\label{fig:pa4-wrong-vaddr-read}
+\end{figure}
+
+修复后，如果分页已经开启，函数先计算页内偏移 \texttt{offset = addr \& PAGE\_MASK}，再判断 \texttt{offset + len > PAGE\_SIZE}。如果没有跨页，就调用 \texttt{page\_translate()} 得到物理地址，并复用 \texttt{paddr\_read()} 完成读取。如果发生跨页，则将一次读取拆成本页剩余部分和下一页起始部分：\texttt{left\_len = PAGE\_SIZE - offset}，\texttt{right\_len = len - left\_len}。函数分别递归读取两段，再按照小端序把后一段左移 \texttt{left\_len * 8} 位后与前一段合并。这样即使两个虚拟页映射到不连续的物理页，也能通过两次独立翻译得到正确结果。
 
 \subsubsection*{\texttt{vaddr\_write()} 的实现逻辑}
 
-\texttt{vaddr\_write()} 与 \texttt{vaddr\_read()} 的结构对称，但它负责写入。分页未开启时，它直接调用 \texttt{paddr\_write(addr, len, data)}，保持原有直通行为，并立即返回。分页开启后，它使用同样的跨页判断条件检查本次写入是否落在单个页内；如果跨页，当前先断言失败，避免在未实现拆分写入的情况下错误覆盖内存。
+\texttt{vaddr\_write()} 与 \texttt{vaddr\_read()} 的结构对称，但它负责写入。分页未开启时，它直接调用 \texttt{paddr\_write(addr, len, data)}，保持原有直通行为，并立即返回。分页开启后，它使用同样的跨页判断条件检查本次写入是否落在单个页内。
 
-当写入范围没有跨页时，函数调用 \texttt{page\_translate()} 将虚拟起始地址翻译为物理地址，再调用 \texttt{paddr\_write()} 写入数据。由于最终仍然走物理写接口，因此 MMIO 写入、普通物理内存写入等底层行为仍由 \texttt{paddr\_write()} 统一处理，虚拟地址层只负责“是否分页”和“如何翻译地址”。
+如果写入范围跨页，函数同样拆成左右两段。低地址部分写入当前页末尾，因此先用 \texttt{left\_mask} 从 \texttt{data} 中取出低 \texttt{left\_len} 字节；高地址部分写入下一页开头，因此将 \texttt{data} 右移 \texttt{left\_len * 8} 位后继续递归写入。非跨页时，函数调用 \texttt{page\_translate()} 将虚拟起始地址翻译为物理地址，再调用 \texttt{paddr\_write()} 写入数据。由于最终仍然走物理写接口，因此 MMIO 写入、普通物理内存写入等底层行为仍由 \texttt{paddr\_write()} 统一处理，虚拟地址层只负责“是否分页”和“如何翻译地址”。
 
 \begin{lstlisting}[language=C,caption={\texttt{memory.c} 中虚拟地址翻译和读写实现},frame=single]
 static paddr_t page_translate(vaddr_t addr) {
@@ -145,8 +154,13 @@ uint32_t vaddr_read(vaddr_t addr, int len) {
     return paddr_read(addr, len);
   }
 
-  if ((addr & PAGE_MASK) + len > PAGE_SIZE) {
-    assert(0);
+  uint32_t offset = addr & PAGE_MASK;
+  if (offset + len > PAGE_SIZE) {
+    int left_len = PAGE_SIZE - offset;
+    int right_len = len - left_len;
+    uint32_t left = vaddr_read(addr, left_len);
+    uint32_t right = vaddr_read(addr + left_len, right_len);
+    return left | (right << (left_len << 3));
   }
 
   paddr_t paddr = page_translate(addr);
@@ -159,8 +173,14 @@ void vaddr_write(vaddr_t addr, int len, uint32_t data) {
     return;
   }
 
-  if ((addr & PAGE_MASK) + len > PAGE_SIZE) {
-    assert(0);
+  uint32_t offset = addr & PAGE_MASK;
+  if (offset + len > PAGE_SIZE) {
+    int left_len = PAGE_SIZE - offset;
+    int right_len = len - left_len;
+    uint32_t left_mask = ~0u >> ((4 - left_len) << 3);
+    vaddr_write(addr, left_len, data & left_mask);
+    vaddr_write(addr + left_len, right_len, data >> (left_len << 3));
+    return;
   }
 
   paddr_t paddr = page_translate(addr);

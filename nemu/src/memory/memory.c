@@ -58,9 +58,13 @@ uint32_t vaddr_read(vaddr_t addr, int len) {
     return paddr_read(addr, len);
   }
 
-  if ((addr & PAGE_MASK) + len > PAGE_SIZE) {
-    // 如果访问跨页了，暂时不支持，直接断言失败
-    assert(0);
+  uint32_t offset = addr & PAGE_MASK;
+  if (offset + len > PAGE_SIZE) {
+    int left_len = PAGE_SIZE - offset;
+    int right_len = len - left_len;
+    uint32_t left = vaddr_read(addr, left_len);
+    uint32_t right = vaddr_read(addr + left_len, right_len);
+    return left | (right << (left_len << 3));
   }
 
   paddr_t paddr = page_translate(addr);
@@ -73,8 +77,14 @@ void vaddr_write(vaddr_t addr, int len, uint32_t data) {
     return;
   }
 
-  if ((addr & PAGE_MASK) + len > PAGE_SIZE) {
-    assert(0);
+  uint32_t offset = addr & PAGE_MASK;
+  if (offset + len > PAGE_SIZE) {
+    int left_len = PAGE_SIZE - offset;
+    int right_len = len - left_len;
+    uint32_t left_mask = ~0u >> ((4 - left_len) << 3);
+    vaddr_write(addr, left_len, data & left_mask);
+    vaddr_write(addr + left_len, right_len, data >> (left_len << 3));
+    return;
   }
 
   paddr_t paddr = page_translate(addr);
