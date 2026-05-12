@@ -10,6 +10,8 @@ static const char *keyname[256] __attribute__((used)) = {
 
 #define KEYDOWN_MASK 0x8000
 
+void switch_game(void);
+
 size_t events_read(void *buf, size_t len) {
   char event[64];
   int key = _read_key();
@@ -18,6 +20,9 @@ size_t events_read(void *buf, size_t len) {
     bool down = (key & KEYDOWN_MASK) != 0;
     key &= ~KEYDOWN_MASK;
     assert(key > _KEY_NONE && key < 256 && keyname[key] != NULL);
+    if (down && key == _KEY_F12) {
+      switch_game();
+    }
     snprintf(event, sizeof(event), "%s %s\n",
         down ? "kd" : "ku", keyname[key]);
   } else {
