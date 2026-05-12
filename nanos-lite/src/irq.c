@@ -4,10 +4,14 @@ _RegSet* do_syscall(_RegSet *r);
 _RegSet* schedule(_RegSet *prev);
 
 static _RegSet* do_event(_Event e, _RegSet* r) {
+  static int timer_log_count = 0;
+
   switch (e.event) {
     case _EVENT_SYSCALL: return do_syscall(r);
     case _EVENT_IRQ_TIME:
-      Log("Timer interrupt event received");
+      if (++ timer_log_count % 50 == 0) {
+        Log("Timer interrupt event received");
+      }
       return schedule(r);
     case _EVENT_TRAP:
       Log("Kernel trap event received");
