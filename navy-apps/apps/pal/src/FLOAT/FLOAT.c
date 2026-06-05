@@ -61,9 +61,9 @@ FLOAT f2F(float a) {
   return sign ? -ret : ret;
 }
 
+// 由于 FLOAT 是一个有符号整数类型，直接判断 a 是否小于 0 来确定是否需要取反
 FLOAT Fabs(FLOAT a) {
-  assert(0);
-  return 0;
+  return a < 0 ? -a : a;
 }
 
 /* Functions below are already implemented */
