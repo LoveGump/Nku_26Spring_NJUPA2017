@@ -31,8 +31,7 @@ void plot(Float(*f)(Float)) {
     if (iy >= -N && iy <= N) {
       iy = (iy + N) / 2;
       if (iy == N) iy --;
-      uint32_t pixel = colors[col];
-      _draw_rect(&pixel, i + (_screen.width - _screen.height) / 2, N - iy - 1, 1, 1);
+      _draw_p(i + (_screen.width - _screen.height) / 2, N - iy, colors[col]);
     }
   }
 
