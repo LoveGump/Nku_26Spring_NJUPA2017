@@ -120,7 +120,9 @@ void render(ImDrawData *draw_data) {
     }
   }
 
-  _draw_rect(fb, 0, 0, _screen.width, _screen.height);
+  for (int i = 0; i < _screen.width; i ++)
+    for (int j = 0; j < _screen.height; j ++)
+      _draw_p(i, j, fb[i + j * _screen.width]);
 
   _draw_sync();
 }
