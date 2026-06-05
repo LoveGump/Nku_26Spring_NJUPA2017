@@ -1,6 +1,7 @@
 #include "FLOAT.h"
 #include <stdint.h>
 #include <assert.h>
+#include <stdbool.h>
 
 FLOAT F_mul_F(FLOAT a, FLOAT b) {
   return ((int64_t)a * b) >> 16;
@@ -8,7 +9,36 @@ FLOAT F_mul_F(FLOAT a, FLOAT b) {
 
 FLOAT F_div_F(FLOAT a, FLOAT b) {
   assert(b != 0);
-  return ((int64_t)a << 16) / b;
+
+  // 确定商的符号
+  bool sign = (a < 0) ^ (b < 0);
+  uint32_t dividend = a < 0 ? -(uint32_t)a : (uint32_t)a; // 被除数取绝对值
+  uint32_t divisor = b < 0 ? -(uint32_t)b : (uint32_t)b;  // 除数取绝对值
+  uint32_t quotient = 0;  // 商的初始值
+  uint32_t remainder = 0; // 余数的初始值
+
+  // 使用二进制长除法算法进行除法运算
+  for (int i = 47; i >= 0; i --) {
+    // 如果 i 大于等于 16，说明我们正在处理被除数的整数部分，
+    // 此时需要从被除数中提取对应位的值；
+    // 如果 i 小于 16，说明我们正在处理被除数的小数部分，此时不需要从被除数中提取值，
+    // 因为小数部分的值已经包含在余数中了
+    uint32_t bit = i >= 16 ? (dividend >> (i - 16)) & 1 : 0;
+    remainder = (remainder << 1) | bit; // 将余数左移一位，并将被除数当前位的值添加到余数的最低位
+
+    // 如果余数大于等于除数，说明商的当前位应该是 1，
+    // 此时需要从余数中减去除数，并将商的当前位设置为 1
+    if (remainder >= divisor) {
+      remainder -= divisor;
+      if (i < 32) {
+        // 只有当 i 小于 32 时，才需要将商的当前位设置为 1，
+        // 因为 FLOAT 的整数部分最多只能有 16 位，小数部分最多只能有 16 位，所以商的总位数最多只能有 32 位
+        quotient |= 1u << i;
+      }
+    }
+  }
+
+  return sign ? -(FLOAT)quotient : (FLOAT)quotient;
 }
 
 FLOAT f2F(float a) {
