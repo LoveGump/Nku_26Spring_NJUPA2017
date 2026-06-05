@@ -27,6 +27,7 @@ enum {
 #define XX(k) [concat(SDL_SCANCODE_, k)] = concat(_KEY_, k),
 static uint32_t keymap[256] = {
   _KEYS(XX)
+  [SDL_SCANCODE_KP_6] = _KEY_RIGHT,
 };
 
 #define KEY_QUEUE_LEN 1024
