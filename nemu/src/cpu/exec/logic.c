@@ -165,6 +165,44 @@ make_EHelper(shr) {
   print_asm_template2(shr);
 }
 
+// shrd：双精度逻辑右移，低位来自 dest，高位由 src 补入
+make_EHelper(shrd) {
+  uint32_t bits = id_dest->width * 8;
+  uint32_t count = id_src->val & 0x1f;
+  uint32_t mask = rtl_width_mask(id_dest->width);
+  uint32_t dest = id_dest->val & mask;
+  uint32_t src = id_src2->val & mask;
+
+  if (count != 0) {
+    uint32_t result;
+
+    if (count < bits) {
+      result = (dest >> count) | (src << (bits - count));
+    } else if (count == bits) {
+      result = src;
+    } else {
+      result = src >> (count - bits);
+    }
+    result &= mask;
+
+    rtl_li(&t2, result);
+    operand_write(id_dest, &t2);
+
+    rtl_li(&t0, (dest >> (count - 1)) & 1);
+    rtl_set_CF(&t0);
+    rtl_update_ZFSF(&t2, id_dest->width);
+
+    if (count == 1) {
+      rtl_li(&t0, ((dest ^ result) >> (bits - 1)) & 1);
+      rtl_set_OF(&t0);
+    } else {
+      rtl_set_OF(&tzero);
+    }
+  }
+
+  print_asm_template3(shrd);
+}
+
 // rol：循环左移，移出的位会被重新移入到另一端
 make_EHelper(rol) {
   uint32_t bits = id_dest->width * 8;                   // 操作数的位数
