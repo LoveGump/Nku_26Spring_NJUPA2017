@@ -174,6 +174,12 @@ enum {
   JIT_ARITH_SUB = 1,
 };
 
+enum {
+  JIT_LOGIC_OR = 0,
+  JIT_LOGIC_AND = 1,
+  JIT_LOGIC_XOR = 2,
+};
+
 static int jit_helper_arith_r2r(uint32_t info, uint32_t exit_eip) {
   /* info: bit[2:0]=src，bit[5:3]=dest，bit[6]=add/sub。 */
   uint8_t src = info & 0x7;
@@ -198,6 +204,36 @@ static int jit_helper_arith_r2r(uint32_t info, uint32_t exit_eip) {
   }
 
   cpu.gpr[dest]._32 = result;
+  cpu.ZF = result == 0;
+  cpu.SF = (result >> 31) & 0x1;
+  cpu.eip = exit_eip;
+  return JIT_EXEC_OK;
+}
+
+static int jit_helper_logic_r2r(uint32_t info, uint32_t exit_eip) {
+  /* info: bit[2:0]=src，bit[5:3]=dest，bit[7:6]=or/and/xor。 */
+  uint8_t src = info & 0x7;
+  uint8_t dest = (info >> 3) & 0x7;
+  uint8_t op = (info >> 6) & 0x3;
+
+  uint32_t dest_val = cpu.gpr[dest]._32;
+  uint32_t src_val = cpu.gpr[src]._32;
+  uint32_t result = 0;
+
+  if (op == JIT_LOGIC_OR) {
+    result = dest_val | src_val;
+  }
+  else if (op == JIT_LOGIC_AND) {
+    result = dest_val & src_val;
+  }
+  else {
+    result = dest_val ^ src_val;
+  }
+
+  cpu.gpr[dest]._32 = result;
+  /* x86 逻辑运算按结果更新 ZF/SF，并把 CF/OF 清零。 */
+  cpu.CF = 0;
+  cpu.OF = 0;
   cpu.ZF = result == 0;
   cpu.SF = (result >> 31) & 0x1;
   cpu.eip = exit_eip;
@@ -291,6 +327,49 @@ static bool tb_is_single_arith_r2r(TB *tb, uint8_t *op, uint8_t *src, uint8_t *d
   return true;
 }
 
+static bool tb_is_single_logic_r2r(TB *tb, uint8_t *op, uint8_t *src, uint8_t *dest) {
+  /* 只识别 OR/AND/XOR 的 32 位、ModR/M mod=3 寄存器形式。 */
+  if (tb->nr_instr != 1 || tb->guest_end != tb->guest_start + 2) {
+    return false;
+  }
+
+  uint8_t opcode = vaddr_read(tb->guest_start, 1);
+  if (opcode != 0x09 && opcode != 0x0b &&
+      opcode != 0x21 && opcode != 0x23 &&
+      opcode != 0x31 && opcode != 0x33) {
+    return false;
+  }
+
+  uint8_t modrm = vaddr_read(tb->guest_start + 1, 1);
+  if ((modrm >> 6) != 3) {
+    return false;
+  }
+
+  uint8_t reg = (modrm >> 3) & 0x7;
+  uint8_t rm = modrm & 0x7;
+  /* 低方向 opcode 写 r/m，高方向 opcode 写 reg。 */
+  if (opcode == 0x09 || opcode == 0x21 || opcode == 0x31) {
+    *src = reg;
+    *dest = rm;
+  }
+  else {
+    *src = rm;
+    *dest = reg;
+  }
+
+  if (opcode == 0x09 || opcode == 0x0b) {
+    *op = JIT_LOGIC_OR;
+  }
+  else if (opcode == 0x21 || opcode == 0x23) {
+    *op = JIT_LOGIC_AND;
+  }
+  else {
+    *op = JIT_LOGIC_XOR;
+  }
+
+  return true;
+}
+
 static void jit_compile_tb(TB *tb) {
   if (tb == NULL || !tb->valid || !tb->sealed || tb->host_code != NULL) {
     return;
@@ -307,7 +386,11 @@ static void jit_compile_tb(TB *tb) {
   uint8_t arith_src = 0;
   uint8_t arith_dest = 0;
   bool is_arith_r2r = tb_is_single_arith_r2r(tb, &arith_op, &arith_src, &arith_dest);
-  if (!is_nop && !is_mov_i2r && !is_mov_r2r && !is_arith_r2r) {
+  uint8_t logic_op = 0;
+  uint8_t logic_src = 0;
+  uint8_t logic_dest = 0;
+  bool is_logic_r2r = tb_is_single_logic_r2r(tb, &logic_op, &logic_src, &logic_dest);
+  if (!is_nop && !is_mov_i2r && !is_mov_r2r && !is_arith_r2r && !is_logic_r2r) {
     return;
   }
 
@@ -332,6 +415,21 @@ static void jit_compile_tb(TB *tb) {
     emit_mov_edi_imm32(&cursor, info);
     emit_mov_esi_imm32(&cursor, tb->exit_eip);
     emit_call(&cursor, jit_helper_arith_r2r);
+    emit_ret(&cursor);
+    jit_code_make_executable();
+
+    tb->host_code = code;
+    tb->host_size = cursor - code;
+    jit_state.stats.native_tbs ++;
+    jit_state.stats.native_instr += tb->nr_instr;
+    return;
+  }
+  else if (is_logic_r2r) {
+    /* 逻辑运算通过 helper 写结果、更新 ZF/SF，并清零 CF/OF。 */
+    uint32_t info = logic_src | (logic_dest << 3) | (logic_op << 6);
+    emit_mov_edi_imm32(&cursor, info);
+    emit_mov_esi_imm32(&cursor, tb->exit_eip);
+    emit_call(&cursor, jit_helper_logic_r2r);
     emit_ret(&cursor);
     jit_code_make_executable();
 
