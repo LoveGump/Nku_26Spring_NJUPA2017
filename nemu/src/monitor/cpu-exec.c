@@ -1,4 +1,5 @@
 #include "nemu.h"
+#include "cpu/decode.h"
 #include "cpu/jit.h"
 #include "monitor/monitor.h"
 #include "monitor/watchpoint.h"
@@ -9,10 +10,31 @@
  * You can modify this value as you want.
  */
 #define MAX_INSTR_TO_PRINT 10
+#define TIMER_IRQ 32
 
 int nemu_state = NEMU_STOP;
 
 void exec_wrapper(bool);
+void raise_intr(uint8_t NO, vaddr_t ret_addr);
+
+#ifdef CONFIG_JIT
+static void handle_native_interrupt(void) {
+  if (!cpu.INTR || !cpu.IF) {
+    return;
+  }
+
+  /*
+   * 与 exec_wrapper() 保持相同顺序：先完成当前 guest 指令，再响应中断。
+   * 这里只处理进入本条指令前已挂起的请求；随后 device_update() 新产生的请求
+   * 留到下一条 guest 指令结束后处理。
+   * raise_intr() 通过 decoding.jmp_eip 返回 IDT 目标，这里直接完成 eip 切换。
+   */
+  cpu.INTR = false;
+  raise_intr(TIMER_IRQ, cpu.eip);
+  cpu.eip = decoding.jmp_eip;
+  decoding.is_jmp = false;
+}
+#endif
 
 static bool finish_one_instr(void) {
 #ifdef DEBUG
@@ -59,6 +81,7 @@ static uint64_t exec_native_tb(TB *tb, uint64_t n, bool print_flag) {
     return 0;
   }
 
+  handle_native_interrupt();
   /* native TB 仍然按客户指令粒度保留 watchpoint 和设备更新语义。 */
   finish_one_instr();
   /* 控制流指令可能根据 EFLAGS 选择不同出口，eip 由 native code 自己写回。 */
