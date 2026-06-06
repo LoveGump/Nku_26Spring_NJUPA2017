@@ -1,4 +1,5 @@
 #include "nemu.h"
+#include "cpu/jit.h"
 #include <unistd.h>
 
 #define ENTRY_START 0x100000
@@ -90,6 +91,8 @@ static inline void restart() {
   cpu.cr3.val = 0;
   cpu.INTR = false; // 关闭中断
 
+  jit_reset();
+
 #ifdef DIFF_TEST
   init_qemu_reg();
 #endif
@@ -134,6 +137,9 @@ int init_monitor(int argc, char *argv[]) {
 
   /* Load the image to memory. */
   load_img();
+
+  /* Initialize the optional JIT framework before CPU reset. */
+  jit_init();
 
   /* Initialize this virtual computer system. */
   restart();

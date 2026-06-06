@@ -14,6 +14,11 @@ LD = gcc
 INCLUDES  = $(addprefix -I, $(INC_DIR))
 CFLAGS   += -O2 -MMD -Wall -Werror -ggdb $(INCLUDES)
 
+JIT ?= 0
+ifeq ($(JIT),1)
+CFLAGS += -DCONFIG_JIT
+endif
+
 # Files to be compiled
 SRCS = $(shell find src/ -name "*.c")
 CODE_FILES = $(shell find src/ include/ -type f \( -name "*.c" -o -name "*.h" \))
