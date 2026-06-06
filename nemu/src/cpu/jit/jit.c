@@ -334,16 +334,27 @@ static int jit_helper_moffs32(uint32_t addr, uint32_t exit_eip, uint32_t op) {
 }
 
 static int jit_helper_mov_rm32(uint32_t info, uint32_t disp, uint32_t exit_eip) {
-  /* info: bit[0]=read/write，bit[3:1]=reg，bit[6:4]=base，bit[7]=has_base。 */
+  /*
+   * info:
+   * bit[0]=read/write，bit[3:1]=reg，bit[6:4]=base，bit[7]=has_base，
+   * bit[10:8]=index，bit[11]=has_index，bit[13:12]=scale。
+   */
   uint8_t op = info & 0x1;
   uint8_t reg = (info >> 1) & 0x7;
   uint8_t base = (info >> 4) & 0x7;
   uint8_t has_base = (info >> 7) & 0x1;
+  uint8_t index = (info >> 8) & 0x7;
+  uint8_t has_index = (info >> 11) & 0x1;
+  uint8_t scale = (info >> 12) & 0x3;
   /* 有符号位移先扩展到 32 位，再叠加可选基址寄存器形成有效地址。 */
   uint32_t addr = (uint32_t)(int32_t)disp;
 
   if (has_base) {
     addr += cpu.gpr[base]._32;
+  }
+  if (has_index) {
+    /* SIB 的 scale 编码就是左移位数: 0/1/2/3 分别表示乘 1/2/4/8。 */
+    addr += cpu.gpr[index]._32 << scale;
   }
 
   if (op == JIT_MEM_RM_READ) {
@@ -553,7 +564,8 @@ static bool tb_is_single_moffs32(TB *tb, uint8_t *op, uint32_t *addr) {
 }
 
 static bool tb_is_single_mov_rm32(TB *tb, uint8_t *op, uint8_t *reg,
-    uint8_t *has_base, uint8_t *base, int32_t *disp) {
+    uint8_t *has_base, uint8_t *base, uint8_t *has_index,
+    uint8_t *index, uint8_t *scale, int32_t *disp) {
   /* 当前只识别单条 32 位 mov r/m32 <-> r32，确保 TB 边界和指令长度一致。 */
   if (tb->nr_instr != 1 || tb->guest_end < tb->guest_start + 2) {
     return false;
@@ -567,31 +579,65 @@ static bool tb_is_single_mov_rm32(TB *tb, uint8_t *op, uint8_t *reg,
   uint8_t modrm = vaddr_read(tb->guest_start + 1, 1);
   uint8_t mod = modrm >> 6;
   uint8_t rm = modrm & 0x7;
-  if (mod == 3 || rm == R_ESP) {
-    /* mod=3 是寄存器形式；rm=esp 表示后接 SIB，留给下一步单独处理。 */
+  if (mod == 3) {
+    /* mod=3 是寄存器形式，已经由寄存器 mov 路径处理。 */
     return false;
   }
 
   *reg = (modrm >> 3) & 0x7;
   *base = rm;
   *has_base = true;
+  *index = 0;
+  *has_index = false;
+  *scale = 0;
   *disp = 0;
   uint32_t len = 2;
 
-  if (mod == 0 && rm == R_EBP) {
-    /* mod=00 rm=101 在 32 位地址编码中不是 ebp，而是 disp32 绝对地址。 */
-    *has_base = false;
-    *disp = vaddr_read(tb->guest_start + 2, 4);
-    len = 6;
-  }
-  else if (mod == 1) {
-    /* disp8 需要按有符号数扩展，例如 -4(%ebp)。 */
-    *disp = (int8_t)vaddr_read(tb->guest_start + 2, 1);
+  if (rm == R_ESP) {
+    /* rm=esp 表示后接 SIB 字节，地址形如 base + index * scale + disp。 */
+    if (tb->guest_end < tb->guest_start + 3) {
+      return false;
+    }
+
+    uint8_t sib = vaddr_read(tb->guest_start + 2, 1);
+    *scale = sib >> 6;
+    *index = (sib >> 3) & 0x7;
+    *base = sib & 0x7;
+    /* x86 规定 SIB index=100b 不表示 esp，而表示没有 index 项。 */
+    *has_index = *index != R_ESP;
+    *has_base = !(mod == 0 && *base == R_EBP);
     len = 3;
+
+    if (mod == 0 && *base == R_EBP) {
+      /* SIB 中 mod=00 base=101 同样表示无基址，后面跟 disp32。 */
+      *disp = vaddr_read(tb->guest_start + 3, 4);
+      len = 7;
+    }
+    else if (mod == 1) {
+      *disp = (int8_t)vaddr_read(tb->guest_start + 3, 1);
+      len = 4;
+    }
+    else if (mod == 2) {
+      *disp = vaddr_read(tb->guest_start + 3, 4);
+      len = 7;
+    }
   }
-  else if (mod == 2) {
-    *disp = vaddr_read(tb->guest_start + 2, 4);
-    len = 6;
+  else {
+    if (mod == 0 && rm == R_EBP) {
+      /* mod=00 rm=101 在 32 位地址编码中不是 ebp，而是 disp32 绝对地址。 */
+      *has_base = false;
+      *disp = vaddr_read(tb->guest_start + 2, 4);
+      len = 6;
+    }
+    else if (mod == 1) {
+      /* disp8 需要按有符号数扩展，例如 -4(%ebp)。 */
+      *disp = (int8_t)vaddr_read(tb->guest_start + 2, 1);
+      len = 3;
+    }
+    else if (mod == 2) {
+      *disp = vaddr_read(tb->guest_start + 2, 4);
+      len = 6;
+    }
   }
 
   if (tb->nr_instr != 1 || tb->guest_end != tb->guest_start + len) {
@@ -637,9 +683,12 @@ static void jit_compile_tb(TB *tb) {
   uint8_t mem_reg = 0;
   uint8_t mem_has_base = 0;
   uint8_t mem_base = 0;
+  uint8_t mem_has_index = 0;
+  uint8_t mem_index = 0;
+  uint8_t mem_scale = 0;
   int32_t mem_disp = 0;
   bool is_mov_rm32 = tb_is_single_mov_rm32(tb, &mem_op, &mem_reg,
-      &mem_has_base, &mem_base, &mem_disp);
+      &mem_has_base, &mem_base, &mem_has_index, &mem_index, &mem_scale, &mem_disp);
   if (!is_nop && !is_mov_i2r && !is_mov_r2r &&
       !is_arith_r2r && !is_logic_r2r && !is_unary_reg &&
       !is_compare_r2r && !is_moffs32 && !is_mov_rm32) {
@@ -736,8 +785,10 @@ static void jit_compile_tb(TB *tb) {
     return;
   }
   else if (is_mov_rm32) {
-    /* ModR/M 访存第一版只支持非 SIB 地址，真正访存仍走 vaddr_*。 */
-    uint32_t info = mem_op | (mem_reg << 1) | (mem_base << 4) | (mem_has_base << 7);
+    /* ModR/M/SIB 只在 helper 中计算有效地址，真正访存仍走 vaddr_*。 */
+    uint32_t info = mem_op | (mem_reg << 1) | (mem_base << 4) |
+      (mem_has_base << 7) | (mem_index << 8) | (mem_has_index << 11) |
+      (mem_scale << 12);
     emit_mov_edi_imm32(&cursor, info);
     emit_mov_esi_imm32(&cursor, mem_disp);
     emit_mov_edx_imm32(&cursor, tb->exit_eip);
