@@ -1,4 +1,6 @@
 #include "cpu/exec.h"
+#include "cpu/jit.h"
+#include "monitor/monitor.h"
 #include "all-instr.h"
 
 #define TIMER_IRQ 32
@@ -272,8 +274,14 @@ void exec_wrapper(bool print_flag) {
 #ifdef DIFF_TEST
   uint32_t eip = cpu.eip;
 #endif
+  vaddr_t instr_start = cpu.eip;
+  vaddr_t instr_end = decoding.seq_eip;
+  bool end_of_tb = decoding.is_jmp || (cpu.INTR && cpu.IF) || (nemu_state != NEMU_RUNNING);
+
   // 更新 eip 的值
   update_eip();
+
+  jit_record_instr(instr_start, instr_end, end_of_tb);
 
   if (cpu.INTR && cpu.IF) {
     cpu.INTR = false;
