@@ -648,6 +648,25 @@ static bool tb_is_single_mov_rm32(TB *tb, uint8_t *op, uint8_t *reg,
   return true;
 }
 
+static bool tb_is_single_direct_jmp(TB *tb) {
+  /* 这里只处理编码里直接带相对位移的无条件跳转；jmp r/m32 仍回退解释器。 */
+  if (tb->nr_instr != 1) {
+    return false;
+  }
+
+  uint8_t opcode = vaddr_read(tb->guest_start, 1);
+  if (opcode == 0xe9) {
+    /* jmp rel32: 1 字节 opcode + 4 字节有符号位移，目标已记录在 exit_eip。 */
+    return tb->guest_end == tb->guest_start + 5;
+  }
+  if (opcode == 0xeb) {
+    /* jmp rel8: 短跳转，同样复用 trace 记录到的真实出口地址。 */
+    return tb->guest_end == tb->guest_start + 2;
+  }
+
+  return false;
+}
+
 static void jit_compile_tb(TB *tb) {
   if (tb == NULL || !tb->valid || !tb->sealed || tb->host_code != NULL) {
     return;
@@ -689,9 +708,10 @@ static void jit_compile_tb(TB *tb) {
   int32_t mem_disp = 0;
   bool is_mov_rm32 = tb_is_single_mov_rm32(tb, &mem_op, &mem_reg,
       &mem_has_base, &mem_base, &mem_has_index, &mem_index, &mem_scale, &mem_disp);
+  bool is_direct_jmp = tb_is_single_direct_jmp(tb);
   if (!is_nop && !is_mov_i2r && !is_mov_r2r &&
       !is_arith_r2r && !is_logic_r2r && !is_unary_reg &&
-      !is_compare_r2r && !is_moffs32 && !is_mov_rm32) {
+      !is_compare_r2r && !is_moffs32 && !is_mov_rm32 && !is_direct_jmp) {
     return;
   }
 
@@ -794,6 +814,19 @@ static void jit_compile_tb(TB *tb) {
     emit_mov_edx_imm32(&cursor, tb->exit_eip);
     emit_call(&cursor, jit_helper_mov_rm32);
     emit_ret(&cursor);
+    jit_code_make_executable();
+
+    tb->host_code = code;
+    tb->host_size = cursor - code;
+    jit_state.stats.native_tbs ++;
+    jit_state.stats.native_instr += tb->nr_instr;
+    return;
+  }
+  else if (is_direct_jmp) {
+    /* 直接跳转的目标来自解释器 trace，避免在 JIT 中重复实现符号位移计算。 */
+    emit_mov_rax_imm64(&cursor, (uint64_t)(uintptr_t)&cpu.eip);
+    emit_mov_m32_rax_imm32(&cursor, tb->exit_eip);
+    emit_return_status(&cursor, JIT_EXEC_OK);
     jit_code_make_executable();
 
     tb->host_code = code;
