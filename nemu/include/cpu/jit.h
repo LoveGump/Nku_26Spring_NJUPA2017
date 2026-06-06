@@ -8,6 +8,8 @@
 #define JIT_TB_CACHE_SIZE 4096
 #define JIT_MAX_TB_INSTR 16
 #define JIT_CODE_CACHE_SIZE (1024 * 1024)
+/* TB 至少被缓存命中三次后才值得生成 native code。 */
+#define JIT_COMPILE_HIT_THRESHOLD 3
 
 typedef int (*jit_func_t)(void);
 
@@ -22,6 +24,8 @@ enum {
 typedef struct TranslationBlock {
   bool valid;
   bool sealed;
+  /* 无论支持与否，每个 TB 最多尝试一次 native 编译。 */
+  bool compile_attempted;
   vaddr_t guest_start;
   vaddr_t guest_end;
   /* trace 实际执行完后的下一条 eip，可能不同于顺序地址 guest_end。 */

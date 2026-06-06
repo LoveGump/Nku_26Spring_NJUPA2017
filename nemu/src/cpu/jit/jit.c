@@ -128,12 +128,6 @@ static void *jit_code_exec_ptr(uint8_t *write_ptr) {
 
 static uint8_t *jit_code_alloc(size_t size) {
   size_t aligned_size = align_up(size, 16);
-  if (jit_state.code_size + aligned_size > jit_state.code_capacity) {
-    /* 简化淘汰策略：代码缓存满时丢弃所有 TB 和 host code。 */
-    jit_invalidate_all();
-    jit_code_reset();
-  }
-
   Assert(jit_state.code_size + aligned_size <= jit_state.code_capacity,
       "JIT code block is too large: %zu bytes", size);
 
@@ -141,6 +135,21 @@ static uint8_t *jit_code_alloc(size_t size) {
   jit_state.code_size += aligned_size;
   jit_state.stats.code_bytes = jit_state.code_size;
   return ptr;
+}
+
+static bool jit_code_prepare(size_t size) {
+  size_t aligned_size = align_up(size, 16);
+  if (jit_state.code_size + aligned_size <= jit_state.code_capacity) {
+    return true;
+  }
+
+  /*
+   * code cache 满时会同时清空所有 TB。调用方必须放弃当前 TB，
+   * 不能继续使用已经被 tb_invalidate() 清零的指针。
+   */
+  jit_invalidate_all();
+  jit_code_reset();
+  return false;
 }
 
 static inline void emit_u8(uint8_t **cursor, uint8_t value) {
@@ -914,6 +923,10 @@ static void jit_compile_tb(TB *tb) {
     return;
   }
 
+  if (!jit_code_prepare(64)) {
+    return;
+  }
+
   uint8_t *code = jit_code_alloc(64);
   uint8_t *cursor = code;
 
@@ -1091,7 +1104,6 @@ static void tb_seal(TB *tb) {
   if (jit_state.active_tb == tb) {
     jit_state.active_tb = NULL;
   }
-  jit_compile_tb(tb);
 }
 
 void jit_init(void) {
@@ -1180,6 +1192,7 @@ TB *tb_alloc(vaddr_t eip) {
 
   tb->valid = true;
   tb->sealed = false;
+  tb->compile_attempted = false;
   tb->guest_start = eip;
   tb->guest_end = eip;
   tb->exit_eip = eip;
@@ -1235,6 +1248,19 @@ TB *jit_lookup_sealed(vaddr_t eip) {
   TB *tb = tb_lookup(eip);
   if (tb == NULL || !tb->sealed) {
     return NULL;
+  }
+
+  /*
+   * 只为真正重复执行的热点 TB 生成 native code，避免一次性代码消耗
+   * 编译时间和 code cache；不支持翻译的 TB 也只尝试编译一次。
+   */
+  if (!tb->compile_attempted && tb->hit_count >= JIT_COMPILE_HIT_THRESHOLD) {
+    tb->compile_attempted = true;
+    jit_compile_tb(tb);
+    /* 编译时 code cache 可能刷新，当前 TB 此时已失效。 */
+    if (!tb->valid || !tb->sealed || tb->guest_start != eip) {
+      return NULL;
+    }
   }
 
   return tb;
