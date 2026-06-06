@@ -368,6 +368,33 @@ static int jit_helper_mov_rm32(uint32_t info, uint32_t disp, uint32_t exit_eip) 
   return JIT_EXEC_OK;
 }
 
+static bool jit_eval_cc(uint8_t subcode) {
+  /* subcode 与 x86 条件跳转低 4 位一致，最低位表示取反。 */
+  bool invert = subcode & 0x1;
+  bool taken = false;
+
+  switch (subcode & 0xe) {
+    case 0x0: taken = cpu.OF; break;
+    case 0x2: taken = cpu.CF; break;
+    case 0x4: taken = cpu.ZF; break;
+    case 0x6: taken = cpu.CF || cpu.ZF; break;
+    case 0x8: taken = cpu.SF; break;
+    case 0xc: taken = cpu.SF != cpu.OF; break;
+    case 0xe: taken = (cpu.SF != cpu.OF) || cpu.ZF; break;
+    default:
+      /* 当前 NEMU 没有 PF，PF/NP 条件保持回退解释器，不进入这里。 */
+      assert(0);
+  }
+
+  return invert ? !taken : taken;
+}
+
+static int jit_helper_jcc(uint32_t subcode, uint32_t target, uint32_t fallthrough) {
+  /* 条件跳转必须每次根据当前 EFLAGS 重新判断，不能固定使用 trace 出口。 */
+  cpu.eip = jit_eval_cc(subcode) ? target : fallthrough;
+  return JIT_EXEC_OK;
+}
+
 static bool tb_is_single_nop(TB *tb) {
   /* 第一版 codegen 只处理无副作用的单字节 nop。 */
   return tb->nr_instr == 1 &&
@@ -667,6 +694,52 @@ static bool tb_is_single_direct_jmp(TB *tb) {
   return false;
 }
 
+static bool tb_is_single_jcc(TB *tb, uint8_t *subcode,
+    uint32_t *target, uint32_t *fallthrough) {
+  if (tb->nr_instr != 1) {
+    return false;
+  }
+
+  uint8_t opcode = vaddr_read(tb->guest_start, 1);
+  if (opcode >= 0x70 && opcode <= 0x7f) {
+    *subcode = opcode & 0xf;
+    if ((*subcode & 0xe) == 0xa) {
+      /* PF/NP 依赖当前 CPU_state 没有实现的 PF，保持解释器行为。 */
+      return false;
+    }
+    if (tb->guest_end != tb->guest_start + 2) {
+      return false;
+    }
+
+    /* rel8 是相对下一条指令的有符号位移。 */
+    *fallthrough = tb->guest_start + 2;
+    *target = *fallthrough + (int8_t)vaddr_read(tb->guest_start + 1, 1);
+    return true;
+  }
+
+  if (opcode == 0x0f && tb->guest_end >= tb->guest_start + 2) {
+    uint8_t opcode2 = vaddr_read(tb->guest_start + 1, 1);
+    if (opcode2 < 0x80 || opcode2 > 0x8f) {
+      return false;
+    }
+
+    *subcode = opcode2 & 0xf;
+    if ((*subcode & 0xe) == 0xa) {
+      return false;
+    }
+    if (tb->guest_end != tb->guest_start + 6) {
+      return false;
+    }
+
+    /* 0f 8x 使用 rel32，同样相对 fallthrough 地址。 */
+    *fallthrough = tb->guest_start + 6;
+    *target = *fallthrough + (int32_t)vaddr_read(tb->guest_start + 2, 4);
+    return true;
+  }
+
+  return false;
+}
+
 static void jit_compile_tb(TB *tb) {
   if (tb == NULL || !tb->valid || !tb->sealed || tb->host_code != NULL) {
     return;
@@ -709,9 +782,14 @@ static void jit_compile_tb(TB *tb) {
   bool is_mov_rm32 = tb_is_single_mov_rm32(tb, &mem_op, &mem_reg,
       &mem_has_base, &mem_base, &mem_has_index, &mem_index, &mem_scale, &mem_disp);
   bool is_direct_jmp = tb_is_single_direct_jmp(tb);
+  uint8_t jcc_subcode = 0;
+  uint32_t jcc_target = 0;
+  uint32_t jcc_fallthrough = 0;
+  bool is_jcc = tb_is_single_jcc(tb, &jcc_subcode, &jcc_target, &jcc_fallthrough);
   if (!is_nop && !is_mov_i2r && !is_mov_r2r &&
       !is_arith_r2r && !is_logic_r2r && !is_unary_reg &&
-      !is_compare_r2r && !is_moffs32 && !is_mov_rm32 && !is_direct_jmp) {
+      !is_compare_r2r && !is_moffs32 && !is_mov_rm32 && !is_direct_jmp &&
+      !is_jcc) {
     return;
   }
 
@@ -827,6 +905,21 @@ static void jit_compile_tb(TB *tb) {
     emit_mov_rax_imm64(&cursor, (uint64_t)(uintptr_t)&cpu.eip);
     emit_mov_m32_rax_imm32(&cursor, tb->exit_eip);
     emit_return_status(&cursor, JIT_EXEC_OK);
+    jit_code_make_executable();
+
+    tb->host_code = code;
+    tb->host_size = cursor - code;
+    jit_state.stats.native_tbs ++;
+    jit_state.stats.native_instr += tb->nr_instr;
+    return;
+  }
+  else if (is_jcc) {
+    /* 条件跳转通过 helper 读取 guest EFLAGS，选择 taken 或 fallthrough。 */
+    emit_mov_edi_imm32(&cursor, jcc_subcode);
+    emit_mov_esi_imm32(&cursor, jcc_target);
+    emit_mov_edx_imm32(&cursor, jcc_fallthrough);
+    emit_call(&cursor, jit_helper_jcc);
+    emit_ret(&cursor);
     jit_code_make_executable();
 
     tb->host_code = code;

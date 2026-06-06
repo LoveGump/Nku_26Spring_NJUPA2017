@@ -51,7 +51,7 @@ static uint64_t exec_native_tb(TB *tb, uint64_t n, bool print_flag) {
 
   /* native TB 仍然按客户指令粒度保留 watchpoint 和设备更新语义。 */
   finish_one_instr();
-  assert(cpu.eip == tb->exit_eip);
+  /* 控制流指令可能根据 EFLAGS 选择不同出口，eip 由 native code 自己写回。 */
   return tb->nr_instr;
 }
 
