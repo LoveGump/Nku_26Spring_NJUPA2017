@@ -1256,10 +1256,14 @@ TB *jit_lookup_sealed(vaddr_t eip) {
    */
   if (!tb->compile_attempted && tb->hit_count >= JIT_COMPILE_HIT_THRESHOLD) {
     tb->compile_attempted = true;
+    jit_state.stats.compile_attempts ++;
     jit_compile_tb(tb);
     /* 编译时 code cache 可能刷新，当前 TB 此时已失效。 */
     if (!tb->valid || !tb->sealed || tb->guest_start != eip) {
       return NULL;
+    }
+    if (tb->host_code == NULL) {
+      jit_state.stats.compile_unsupported ++;
     }
   }
 
@@ -1276,9 +1280,19 @@ int jit_exec_native(TB *tb) {
     return JIT_EXEC_FALLBACK;
   }
 
+  /* helper 可能在执行期间失效当前 TB，因此调用前先保存动态指令数。 */
+  uint32_t nr_instr = tb->nr_instr;
   jit_func_t fn = (jit_func_t)tb->host_code;
   jit_state.stats.native_calls ++;
-  return fn();
+  int ret = fn();
+  if (ret == JIT_EXEC_OK) {
+    jit_state.stats.native_executed_instr += nr_instr;
+  }
+  return ret;
+}
+
+void jit_record_direct_exec(void) {
+  jit_state.stats.direct_instr ++;
 }
 
 void jit_begin_tb_exec(TB *tb) {

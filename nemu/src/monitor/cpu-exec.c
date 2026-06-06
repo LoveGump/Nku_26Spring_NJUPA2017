@@ -160,6 +160,8 @@ void cpu_exec(uint64_t n) {
 #endif
 
     bool running = exec_one_instr(print_flag);
+    /* 未命中 sealed TB 的指令属于普通解释执行，用于计算 native 动态覆盖率。 */
+    jit_record_direct_exec();
     n --;
 
     if (nemu_state != NEMU_RUNNING) { return; }

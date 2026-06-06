@@ -48,12 +48,16 @@ typedef struct {
   uint64_t executed_tbs;
   uint64_t executed_instr;
   uint64_t aborted_tbs;
+  uint64_t direct_instr;
   uint64_t code_bytes;
   uint64_t code_flushes;
   uint64_t code_self_tests;
+  uint64_t compile_attempts;
+  uint64_t compile_unsupported;
   uint64_t native_tbs;
   uint64_t native_instr;
   uint64_t native_calls;
+  uint64_t native_executed_instr;
   uint64_t native_fallbacks;
   uint32_t max_tb_instr;
 } JITStats;
@@ -67,6 +71,7 @@ TB *tb_alloc(vaddr_t eip);
 void tb_invalidate(TB *tb);
 const JITStats *jit_get_stats(void);
 void jit_record_instr(vaddr_t start, vaddr_t end, vaddr_t next_eip, bool end_of_tb);
+void jit_record_direct_exec(void);
 TB *jit_lookup_sealed(vaddr_t eip);
 void jit_begin_tb_exec(TB *tb);
 void jit_end_tb_exec(uint32_t nr_instr, bool aborted);
@@ -82,6 +87,7 @@ static inline void jit_reset(void) {}
 static inline void jit_invalidate_all(void) {}
 static inline void jit_invalidate_range(vaddr_t addr, uint32_t len) {}
 static inline void jit_record_instr(vaddr_t start, vaddr_t end, vaddr_t next_eip, bool end_of_tb) {}
+static inline void jit_record_direct_exec(void) {}
 
 #endif
 

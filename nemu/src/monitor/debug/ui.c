@@ -1,8 +1,10 @@
 #include "monitor/monitor.h"
 #include "monitor/expr.h"
 #include "monitor/watchpoint.h"
+#include "cpu/jit.h"
 #include "nemu.h"
 
+#include <inttypes.h>
 #include <stdlib.h>
 #include <readline/readline.h>
 #include <readline/history.h>
@@ -52,10 +54,38 @@ static int cmd_si(char *args) {
   return 0;
 }
 
-// info r：显示寄存器状态；info w：显示watchpoint信息
+static void display_jit_stats(void) {
+#ifdef CONFIG_JIT
+  const JITStats *stats = jit_get_stats();
+  uint64_t dynamic_instr =
+    stats->direct_instr + stats->executed_instr + stats->native_executed_instr;
+  double native_ratio = dynamic_instr == 0 ? 0.0 :
+    100.0 * stats->native_executed_instr / dynamic_instr;
+  double compile_ratio = stats->compile_attempts == 0 ? 0.0 :
+    100.0 * stats->native_tbs / stats->compile_attempts;
+
+  printf("TB lookup: hits=%" PRIu64 ", misses=%" PRIu64 ", translations=%" PRIu64 "\n",
+      stats->hits, stats->misses, stats->translations);
+  printf("TB compile: attempts=%" PRIu64 ", native=%" PRIu64
+         ", unsupported=%" PRIu64 ", success=%.2f%%\n",
+      stats->compile_attempts, stats->native_tbs,
+      stats->compile_unsupported, compile_ratio);
+  printf("Dynamic instructions: direct=%" PRIu64 ", cached=%" PRIu64
+         ", native=%" PRIu64 ", native coverage=%.2f%%\n",
+      stats->direct_instr, stats->executed_instr,
+      stats->native_executed_instr, native_ratio);
+  printf("Code cache: bytes=%" PRIu64 ", flushes=%" PRIu64
+         ", invalidations=%" PRIu64 "\n",
+      stats->code_bytes, stats->code_flushes, stats->invalidations);
+#else
+  printf("JIT is disabled in this build.\n");
+#endif
+}
+
+// info r：显示寄存器；info w：显示watchpoint；info j：显示JIT统计
 static int cmd_info(char *args) {
   if (args == NULL) {
-    printf("Usage: info r|w\n");
+    printf("Usage: info r|w|j\n");
     return 0;
   }
 
@@ -64,6 +94,9 @@ static int cmd_info(char *args) {
   }
   else if (strcmp(args, "w") == 0) {
     wp_display();
+  }
+  else if (strcmp(args, "j") == 0) {
+    display_jit_stats();
   }
   else {
     printf("Unknown info command '%s'\n", args);
