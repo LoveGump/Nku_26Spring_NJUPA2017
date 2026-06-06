@@ -3,11 +3,16 @@
 #ifdef CONFIG_JIT
 
 #include <errno.h>
+#include <linux/memfd.h>
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/mman.h>
+#include <sys/syscall.h>
 #include <unistd.h>
+
+#define JIT_GUEST_PAGE_SHIFT 12
+#define JIT_GUEST_PAGE_COUNT (1u << (32 - JIT_GUEST_PAGE_SHIFT))
 
 typedef struct {
   bool enabled;
@@ -16,9 +21,11 @@ typedef struct {
   bool ignoring_sealed_tb;
   vaddr_t ignore_until;
   uint8_t *code_cache;
+  uint8_t *code_exec_cache;
   size_t code_capacity;
   size_t code_size;
-  bool code_writable;
+  /* 记录每个 guest 4KB 页包含的有效 TB 数量，供写路径快速排除数据页。 */
+  uint16_t code_page_refs[JIT_GUEST_PAGE_COUNT];
   JITStats stats;
 } JITState;
 
@@ -32,27 +39,52 @@ static inline size_t align_up(size_t value, size_t align) {
   return (value + align - 1) & ~(align - 1);
 }
 
-static void jit_code_protect(int prot, bool writable) {
-  if (jit_state.code_cache == NULL) {
+static void tb_update_code_page_refs(TB *tb, int delta) {
+  if (tb == NULL || !tb->valid || !tb->sealed || tb->guest_end <= tb->guest_start) {
     return;
   }
 
-  /* code cache 在写入和执行之间切换权限，避免长期保持 RWX。 */
-  int ret = mprotect(jit_state.code_cache, jit_state.code_capacity, prot);
-  Assert(ret == 0, "mprotect JIT code cache failed: %s", strerror(errno));
-  jit_state.code_writable = writable;
+  uint32_t first = tb->guest_start >> JIT_GUEST_PAGE_SHIFT;
+  uint32_t last = (tb->guest_end - 1) >> JIT_GUEST_PAGE_SHIFT;
+  for (uint32_t page = first; page <= last; page ++) {
+    if (delta > 0) {
+      Assert(jit_state.code_page_refs[page] != UINT16_MAX,
+          "too many JIT TBs on guest page 0x%x", page);
+      jit_state.code_page_refs[page] ++;
+    }
+    else {
+      Assert(jit_state.code_page_refs[page] > 0,
+          "JIT code page ref underflow on guest page 0x%x", page);
+      jit_state.code_page_refs[page] --;
+    }
+  }
 }
 
-static void jit_code_make_writable(void) {
-  if (!jit_state.code_writable) {
-    jit_code_protect(PROT_READ | PROT_WRITE, true);
+static bool jit_range_may_touch_code(vaddr_t addr, uint32_t len) {
+  if (len == 0) {
+    return false;
   }
+
+  /*
+   * 大多数 guest 写入落在栈或数据页。先按页引用表过滤，
+   * 只有写到包含 TB 指令字节的页时，才扫描 TB cache 做精确判断。
+   */
+  uint32_t first = addr >> JIT_GUEST_PAGE_SHIFT;
+  uint32_t last = (addr + len - 1) >> JIT_GUEST_PAGE_SHIFT;
+  for (uint32_t page = first; page <= last; page ++) {
+    if (jit_state.code_page_refs[page] != 0) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 static void jit_code_make_executable(void) {
-  if (jit_state.code_writable) {
-    jit_code_protect(PROT_READ | PROT_EXEC, false);
-  }
+  /*
+   * x86 指令缓存与数据缓存保持一致；双映射下生成代码无需再调用 mprotect()。
+   * 保留该接口，让各 codegen 分支的收尾逻辑保持统一。
+   */
 }
 
 static void jit_code_init(void) {
@@ -60,20 +92,38 @@ static void jit_code_init(void) {
     return;
   }
 
-  /* 第一版先使用固定大小的线性 code cache，后续不够时整体清空重来。 */
+  /*
+   * 同一个 memfd 建立 RW 和 RX 两份映射：codegen 始终写 RW 地址，
+   * native TB 始终执行 RX 地址，既遵守 W^X 又避免逐 TB mprotect()。
+   */
   jit_state.code_capacity = JIT_CODE_CACHE_SIZE;
+  int fd = syscall(SYS_memfd_create, "nemu-jit-code", MFD_CLOEXEC);
+  Assert(fd >= 0, "memfd_create JIT code cache failed: %s", strerror(errno));
+  int ret = ftruncate(fd, jit_state.code_capacity);
+  Assert(ret == 0, "ftruncate JIT code cache failed: %s", strerror(errno));
+
   jit_state.code_cache = mmap(NULL, jit_state.code_capacity,
-      PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+      PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
   Assert(jit_state.code_cache != MAP_FAILED, "mmap JIT code cache failed: %s", strerror(errno));
+  jit_state.code_exec_cache = mmap(NULL, jit_state.code_capacity,
+      PROT_READ | PROT_EXEC, MAP_SHARED, fd, 0);
+  Assert(jit_state.code_exec_cache != MAP_FAILED,
+      "mmap executable JIT code cache failed: %s", strerror(errno));
+  close(fd);
+
   jit_state.code_size = 0;
-  jit_state.code_writable = true;
 }
 
 static void jit_code_reset(void) {
-  jit_code_make_writable();
   jit_state.code_size = 0;
   jit_state.stats.code_bytes = 0;
   jit_state.stats.code_flushes ++;
+}
+
+static void *jit_code_exec_ptr(uint8_t *write_ptr) {
+  size_t offset = write_ptr - jit_state.code_cache;
+  Assert(offset < jit_state.code_capacity, "invalid JIT code pointer");
+  return jit_state.code_exec_cache + offset;
 }
 
 static uint8_t *jit_code_alloc(size_t size) {
@@ -86,7 +136,6 @@ static uint8_t *jit_code_alloc(size_t size) {
 
   Assert(jit_state.code_size + aligned_size <= jit_state.code_capacity,
       "JIT code block is too large: %zu bytes", size);
-  jit_code_make_writable();
 
   uint8_t *ptr = jit_state.code_cache + jit_state.code_size;
   jit_state.code_size += aligned_size;
@@ -889,7 +938,7 @@ static void jit_compile_tb(TB *tb) {
     emit_ret(&cursor);
     jit_code_make_executable();
 
-    tb->host_code = code;
+    tb->host_code = jit_code_exec_ptr(code);
     tb->host_size = cursor - code;
     jit_state.stats.native_tbs ++;
     jit_state.stats.native_instr += tb->nr_instr;
@@ -904,7 +953,7 @@ static void jit_compile_tb(TB *tb) {
     emit_ret(&cursor);
     jit_code_make_executable();
 
-    tb->host_code = code;
+    tb->host_code = jit_code_exec_ptr(code);
     tb->host_size = cursor - code;
     jit_state.stats.native_tbs ++;
     jit_state.stats.native_instr += tb->nr_instr;
@@ -918,7 +967,7 @@ static void jit_compile_tb(TB *tb) {
     emit_ret(&cursor);
     jit_code_make_executable();
 
-    tb->host_code = code;
+    tb->host_code = jit_code_exec_ptr(code);
     tb->host_size = cursor - code;
     jit_state.stats.native_tbs ++;
     jit_state.stats.native_instr += tb->nr_instr;
@@ -933,7 +982,7 @@ static void jit_compile_tb(TB *tb) {
     emit_ret(&cursor);
     jit_code_make_executable();
 
-    tb->host_code = code;
+    tb->host_code = jit_code_exec_ptr(code);
     tb->host_size = cursor - code;
     jit_state.stats.native_tbs ++;
     jit_state.stats.native_instr += tb->nr_instr;
@@ -948,7 +997,7 @@ static void jit_compile_tb(TB *tb) {
     emit_ret(&cursor);
     jit_code_make_executable();
 
-    tb->host_code = code;
+    tb->host_code = jit_code_exec_ptr(code);
     tb->host_size = cursor - code;
     jit_state.stats.native_tbs ++;
     jit_state.stats.native_instr += tb->nr_instr;
@@ -966,7 +1015,7 @@ static void jit_compile_tb(TB *tb) {
     emit_ret(&cursor);
     jit_code_make_executable();
 
-    tb->host_code = code;
+    tb->host_code = jit_code_exec_ptr(code);
     tb->host_size = cursor - code;
     jit_state.stats.native_tbs ++;
     jit_state.stats.native_instr += tb->nr_instr;
@@ -979,7 +1028,7 @@ static void jit_compile_tb(TB *tb) {
     emit_return_status(&cursor, JIT_EXEC_OK);
     jit_code_make_executable();
 
-    tb->host_code = code;
+    tb->host_code = jit_code_exec_ptr(code);
     tb->host_size = cursor - code;
     jit_state.stats.native_tbs ++;
     jit_state.stats.native_instr += tb->nr_instr;
@@ -994,7 +1043,7 @@ static void jit_compile_tb(TB *tb) {
     emit_ret(&cursor);
     jit_code_make_executable();
 
-    tb->host_code = code;
+    tb->host_code = jit_code_exec_ptr(code);
     tb->host_size = cursor - code;
     jit_state.stats.native_tbs ++;
     jit_state.stats.native_instr += tb->nr_instr;
@@ -1009,7 +1058,7 @@ static void jit_compile_tb(TB *tb) {
     emit_ret(&cursor);
     jit_code_make_executable();
 
-    tb->host_code = code;
+    tb->host_code = jit_code_exec_ptr(code);
     tb->host_size = cursor - code;
     jit_state.stats.native_tbs ++;
     jit_state.stats.native_instr += tb->nr_instr;
@@ -1022,7 +1071,7 @@ static void jit_compile_tb(TB *tb) {
   emit_return_status(&cursor, JIT_EXEC_OK);
   jit_code_make_executable();
 
-  tb->host_code = code;
+  tb->host_code = jit_code_exec_ptr(code);
   tb->host_size = cursor - code;
   jit_state.stats.native_tbs ++;
   jit_state.stats.native_instr += tb->nr_instr;
@@ -1038,6 +1087,7 @@ static void tb_seal(TB *tb) {
   if (tb->nr_instr > jit_state.stats.max_tb_instr) {
     jit_state.stats.max_tb_instr = tb->nr_instr;
   }
+  tb_update_code_page_refs(tb, 1);
   if (jit_state.active_tb == tb) {
     jit_state.active_tb = NULL;
   }
@@ -1069,7 +1119,45 @@ void jit_invalidate_all(void) {
   for (int i = 0; i < JIT_TB_CACHE_SIZE; i ++) {
     tb_invalidate(&jit_state.tb_cache[i]);
   }
+  memset(jit_state.code_page_refs, 0, sizeof(jit_state.code_page_refs));
   jit_state.stats.invalidations ++;
+}
+
+void jit_invalidate_range(vaddr_t addr, uint32_t len) {
+  if (len == 0) {
+    return;
+  }
+
+  if (!jit_range_may_touch_code(addr, len)) {
+    return;
+  }
+
+  /*
+   * 页引用表只负责快速过滤；命中代码页后仍按精确字节范围判断，
+   * 避免同页中的普通数据写入误伤不重叠的 TB。
+   */
+  vaddr_t end = addr + len;
+  bool invalidated = false;
+  for (int i = 0; i < JIT_TB_CACHE_SIZE; i ++) {
+    TB *tb = &jit_state.tb_cache[i];
+    if (!tb->valid) {
+      continue;
+    }
+
+    if (addr < tb->guest_end && end > tb->guest_start) {
+      if (jit_state.active_tb == tb) {
+        jit_state.active_tb = NULL;
+      }
+      tb_invalidate(tb);
+      invalidated = true;
+    }
+  }
+
+  if (invalidated) {
+    jit_state.ignoring_sealed_tb = false;
+    jit_state.ignore_until = 0;
+    jit_state.stats.invalidations ++;
+  }
 }
 
 TB *tb_lookup(vaddr_t eip) {
@@ -1111,6 +1199,7 @@ void tb_invalidate(TB *tb) {
 
   if (tb->valid) {
     jit_state.stats.total_instr += tb->nr_instr;
+    tb_update_code_page_refs(tb, -1);
   }
   memset(tb, 0, sizeof(*tb));
 }
@@ -1129,14 +1218,14 @@ jit_func_t jit_emit_return(int status, uint32_t *host_size) {
   if (host_size != NULL) {
     *host_size = cursor - code;
   }
-  return (jit_func_t)code;
+  return (jit_func_t)jit_code_exec_ptr(code);
 }
 
 int jit_code_self_test(void) {
   uint32_t host_size = 0;
   jit_func_t fn = jit_emit_return(JIT_EXEC_OK, &host_size);
   Assert(fn != NULL && host_size == 6, "unexpected JIT self-test code size: %u", host_size);
-  /* 直接调用刚生成的 host code，确认 mmap/mprotect/codegen 三件事都可用。 */
+  /* 直接调用刚生成的 host code，确认 RW/RX 双映射和 codegen 均可用。 */
   int ret = fn();
   jit_state.stats.code_self_tests ++;
   return ret;

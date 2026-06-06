@@ -57,6 +57,7 @@ typedef struct {
 void jit_init(void);
 void jit_reset(void);
 void jit_invalidate_all(void);
+void jit_invalidate_range(vaddr_t addr, uint32_t len);
 TB *tb_lookup(vaddr_t eip);
 TB *tb_alloc(vaddr_t eip);
 void tb_invalidate(TB *tb);
@@ -75,6 +76,7 @@ int jit_exec_native(TB *tb);
 static inline void jit_init(void) {}
 static inline void jit_reset(void) {}
 static inline void jit_invalidate_all(void) {}
+static inline void jit_invalidate_range(vaddr_t addr, uint32_t len) {}
 static inline void jit_record_instr(vaddr_t start, vaddr_t end, vaddr_t next_eip, bool end_of_tb) {}
 
 #endif

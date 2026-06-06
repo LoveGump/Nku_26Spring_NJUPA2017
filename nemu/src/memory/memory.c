@@ -75,8 +75,8 @@ uint32_t vaddr_read(vaddr_t addr, int len) {
 void vaddr_write(vaddr_t addr, int len, uint32_t data) {
   if (!cpu.cr0.paging) {
     paddr_write(addr, len, data);
-    /* 保守处理自修改代码：任意 guest 写内存后丢弃所有已翻译 TB。 */
-    jit_invalidate_all();
+    /* 普通数据写不必清空全部 TB；只有覆盖已翻译指令时才失效对应 TB。 */
+    jit_invalidate_range(addr, len);
     return;
   }
 
@@ -92,6 +92,6 @@ void vaddr_write(vaddr_t addr, int len, uint32_t data) {
 
   paddr_t paddr = page_translate(addr);
   paddr_write(paddr, len, data);
-  /* 分页路径同样采用全量失效，避免页表映射或代码页内容变化后复用旧 TB。 */
-  jit_invalidate_all();
+  /* 分页状态变化由 cr0/cr3 全量失效处理；普通写入只检查当前虚拟地址范围。 */
+  jit_invalidate_range(addr, len);
 }
