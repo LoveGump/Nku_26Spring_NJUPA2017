@@ -157,19 +157,46 @@ static bool tb_is_single_nop(TB *tb) {
     vaddr_read(tb->guest_start, 1) == 0x90;
 }
 
+static bool tb_is_single_mov_i2r(TB *tb, uint8_t *reg, uint32_t *imm) {
+  /* 0xb8..0xbf 是 mov imm32 -> r32，编码固定为 opcode + imm32。 */
+  if (tb->nr_instr != 1 || tb->guest_end != tb->guest_start + 5) {
+    return false;
+  }
+
+  uint8_t opcode = vaddr_read(tb->guest_start, 1);
+  if (opcode < 0xb8 || opcode > 0xbf) {
+    return false;
+  }
+
+  *reg = opcode & 0x7;
+  /* x86 guest 立即数为小端，vaddr_read(..., 4) 正好还原成 uint32_t。 */
+  *imm = vaddr_read(tb->guest_start + 1, 4);
+  return true;
+}
+
 static void jit_compile_tb(TB *tb) {
   if (tb == NULL || !tb->valid || !tb->sealed || tb->host_code != NULL) {
     return;
   }
 
-  if (!tb_is_single_nop(tb)) {
+  bool is_nop = tb_is_single_nop(tb);
+  uint8_t reg = 0;
+  uint32_t imm = 0;
+  bool is_mov_i2r = tb_is_single_mov_i2r(tb, &reg, &imm);
+  if (!is_nop && !is_mov_i2r) {
     return;
   }
 
-  uint8_t *code = jit_code_alloc(32);
+  uint8_t *code = jit_code_alloc(64);
   uint8_t *cursor = code;
 
-  /* nop 不修改通用寄存器和 EFLAGS，native 代码只需要推进 eip。 */
+  if (is_mov_i2r) {
+    /* mov imm32 -> r32 只写通用寄存器，不影响 EFLAGS。 */
+    emit_mov_rax_imm64(&cursor, (uint64_t)(uintptr_t)&cpu.gpr[reg]._32);
+    emit_mov_m32_rax_imm32(&cursor, imm);
+  }
+
+  /* nop 不修改 CPU 状态；mov 写完寄存器后也只需要推进 eip。 */
   emit_mov_rax_imm64(&cursor, (uint64_t)(uintptr_t)&cpu.eip);
   emit_mov_m32_rax_imm32(&cursor, tb->exit_eip);
   emit_return_status(&cursor, JIT_EXEC_OK);

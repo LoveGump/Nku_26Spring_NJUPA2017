@@ -255,8 +255,8 @@ static inline bool is_tb_boundary_opcode(void) {
   uint32_t opcode = decoding.opcode;
 
 #ifdef CONFIG_JIT
-  /* 当前 native codegen 只认识单条 nop，因此先把 nop 单独封成 TB。 */
-  if (opcode == 0x90) {
+  /* 当前 native codegen 只处理单条候选指令，因此先把它们单独封成 TB。 */
+  if (opcode == 0x90 || (opcode >= 0xb8 && opcode <= 0xbf)) {
     return true;
   }
 #endif
