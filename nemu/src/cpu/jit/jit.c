@@ -120,6 +120,16 @@ static void emit_mov_m32_rax_imm32(uint8_t **cursor, uint32_t value) {
   emit_u32(cursor, value);
 }
 
+static void emit_mov_ecx_m32_rax(uint8_t **cursor) {
+  emit_u8(cursor, 0x8b);
+  emit_u8(cursor, 0x08);
+}
+
+static void emit_mov_m32_rax_ecx(uint8_t **cursor) {
+  emit_u8(cursor, 0x89);
+  emit_u8(cursor, 0x08);
+}
+
 static void emit_ret(uint8_t **cursor) {
   emit_u8(cursor, 0xc3);
 }
@@ -174,6 +184,37 @@ static bool tb_is_single_mov_i2r(TB *tb, uint8_t *reg, uint32_t *imm) {
   return true;
 }
 
+static bool tb_is_single_mov_r2r(TB *tb, uint8_t *src, uint8_t *dest) {
+  /* 0x89/0x8b 共用 ModR/M；第一版只接受 mod=3 的纯寄存器形态。 */
+  if (tb->nr_instr != 1 || tb->guest_end != tb->guest_start + 2) {
+    return false;
+  }
+
+  uint8_t opcode = vaddr_read(tb->guest_start, 1);
+  if (opcode != 0x89 && opcode != 0x8b) {
+    return false;
+  }
+
+  uint8_t modrm = vaddr_read(tb->guest_start + 1, 1);
+  if ((modrm >> 6) != 3) {
+    return false;
+  }
+
+  uint8_t reg = (modrm >> 3) & 0x7;
+  uint8_t rm = modrm & 0x7;
+  /* 0x89: r/m32 <- r32；0x8b: r32 <- r/m32。 */
+  if (opcode == 0x89) {
+    *src = reg;
+    *dest = rm;
+  }
+  else {
+    *src = rm;
+    *dest = reg;
+  }
+
+  return true;
+}
+
 static void jit_compile_tb(TB *tb) {
   if (tb == NULL || !tb->valid || !tb->sealed || tb->host_code != NULL) {
     return;
@@ -183,7 +224,10 @@ static void jit_compile_tb(TB *tb) {
   uint8_t reg = 0;
   uint32_t imm = 0;
   bool is_mov_i2r = tb_is_single_mov_i2r(tb, &reg, &imm);
-  if (!is_nop && !is_mov_i2r) {
+  uint8_t src = 0;
+  uint8_t dest = 0;
+  bool is_mov_r2r = tb_is_single_mov_r2r(tb, &src, &dest);
+  if (!is_nop && !is_mov_i2r && !is_mov_r2r) {
     return;
   }
 
@@ -195,8 +239,15 @@ static void jit_compile_tb(TB *tb) {
     emit_mov_rax_imm64(&cursor, (uint64_t)(uintptr_t)&cpu.gpr[reg]._32);
     emit_mov_m32_rax_imm32(&cursor, imm);
   }
+  else if (is_mov_r2r) {
+    /* 只支持 ModR/M mod=3 的寄存器复制，不碰访存路径。 */
+    emit_mov_rax_imm64(&cursor, (uint64_t)(uintptr_t)&cpu.gpr[src]._32);
+    emit_mov_ecx_m32_rax(&cursor);
+    emit_mov_rax_imm64(&cursor, (uint64_t)(uintptr_t)&cpu.gpr[dest]._32);
+    emit_mov_m32_rax_ecx(&cursor);
+  }
 
-  /* nop 不修改 CPU 状态；mov 写完寄存器后也只需要推进 eip。 */
+  /* 目前支持的 native 指令都不改变控制流，最后统一推进 eip。 */
   emit_mov_rax_imm64(&cursor, (uint64_t)(uintptr_t)&cpu.eip);
   emit_mov_m32_rax_imm32(&cursor, tb->exit_eip);
   emit_return_status(&cursor, JIT_EXEC_OK);
