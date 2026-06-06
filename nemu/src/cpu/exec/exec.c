@@ -251,8 +251,15 @@ static inline void update_eip(void) {
   cpu.eip = (decoding.is_jmp ? (decoding.is_jmp = 0, decoding.jmp_eip) : decoding.seq_eip);
 }
 
-static inline bool is_control_flow_opcode(void) {
+static inline bool is_tb_boundary_opcode(void) {
   uint32_t opcode = decoding.opcode;
+
+#ifdef CONFIG_JIT
+  /* 当前 native codegen 只认识单条 nop，因此先把 nop 单独封成 TB。 */
+  if (opcode == 0x90) {
+    return true;
+  }
+#endif
 
   if ((opcode >= 0x70 && opcode <= 0x7f) || (opcode >= 0x180 && opcode <= 0x18f)) {
     return true;
@@ -291,7 +298,7 @@ void exec_wrapper(bool print_flag) {
 #endif
   vaddr_t instr_start = cpu.eip;
   vaddr_t instr_end = decoding.seq_eip;
-  bool end_of_tb = is_control_flow_opcode() || (cpu.INTR && cpu.IF) || (nemu_state != NEMU_RUNNING);
+  bool end_of_tb = is_tb_boundary_opcode() || (cpu.INTR && cpu.IF) || (nemu_state != NEMU_RUNNING);
 
   // 更新 eip 的值
   update_eip();

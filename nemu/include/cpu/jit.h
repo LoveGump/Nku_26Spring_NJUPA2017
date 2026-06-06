@@ -47,6 +47,10 @@ typedef struct {
   uint64_t code_bytes;
   uint64_t code_flushes;
   uint64_t code_self_tests;
+  uint64_t native_tbs;
+  uint64_t native_instr;
+  uint64_t native_calls;
+  uint64_t native_fallbacks;
   uint32_t max_tb_instr;
 } JITStats;
 
@@ -63,6 +67,8 @@ void jit_begin_tb_exec(TB *tb);
 void jit_end_tb_exec(uint32_t nr_instr, bool aborted);
 jit_func_t jit_emit_return(int status, uint32_t *host_size);
 int jit_code_self_test(void);
+bool jit_tb_has_native(TB *tb);
+int jit_exec_native(TB *tb);
 
 #else
 

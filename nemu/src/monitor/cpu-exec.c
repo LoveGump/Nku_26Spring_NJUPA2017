@@ -14,11 +14,7 @@ int nemu_state = NEMU_STOP;
 
 void exec_wrapper(bool);
 
-static bool exec_one_instr(bool print_flag) {
-  /* Execute one instruction, including instruction fetch,
-   * instruction decode, and the actual execution. */
-  exec_wrapper(print_flag);
-
+static bool finish_one_instr(void) {
 #ifdef DEBUG
   /* TODO(finished): check watchpoints here. */
   if (check_watchpoints()) {
@@ -35,7 +31,30 @@ static bool exec_one_instr(bool print_flag) {
   return nemu_state == NEMU_RUNNING;
 }
 
+static bool exec_one_instr(bool print_flag) {
+  /* Execute one instruction, including instruction fetch,
+   * instruction decode, and the actual execution. */
+  exec_wrapper(print_flag);
+  return finish_one_instr();
+}
+
 #ifdef CONFIG_JIT
+static uint64_t exec_native_tb(TB *tb, uint64_t n, bool print_flag) {
+  if (print_flag || tb->nr_instr > n || !jit_tb_has_native(tb)) {
+    return 0;
+  }
+
+  int ret = jit_exec_native(tb);
+  if (ret != JIT_EXEC_OK) {
+    return 0;
+  }
+
+  /* native TB 仍然按客户指令粒度保留 watchpoint 和设备更新语义。 */
+  finish_one_instr();
+  assert(cpu.eip == tb->exit_eip);
+  return tb->nr_instr;
+}
+
 static uint64_t exec_cached_tb(TB *tb, uint64_t n, bool print_flag) {
   assert(tb != NULL && tb->valid && tb->sealed);
 
@@ -86,6 +105,13 @@ void cpu_exec(uint64_t n) {
 #ifdef CONFIG_JIT
     TB *tb = jit_lookup_sealed(cpu.eip);
     if (tb != NULL) {
+      uint64_t native_executed = exec_native_tb(tb, n, print_flag);
+      if (native_executed > 0) {
+        n -= native_executed;
+        if (nemu_state != NEMU_RUNNING) { return; }
+        continue;
+      }
+
       uint64_t executed = exec_cached_tb(tb, n, print_flag);
       if (executed > 0) {
         n -= executed;

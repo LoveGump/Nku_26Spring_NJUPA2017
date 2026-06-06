@@ -108,6 +108,18 @@ static inline void __attribute__((unused)) emit_u64(uint8_t **cursor, uint64_t v
   *cursor += sizeof(value);
 }
 
+static void emit_mov_rax_imm64(uint8_t **cursor, uint64_t value) {
+  emit_u8(cursor, 0x48);
+  emit_u8(cursor, 0xb8);
+  emit_u64(cursor, value);
+}
+
+static void emit_mov_m32_rax_imm32(uint8_t **cursor, uint32_t value) {
+  emit_u8(cursor, 0xc7);
+  emit_u8(cursor, 0x00);
+  emit_u32(cursor, value);
+}
+
 static void emit_ret(uint8_t **cursor) {
   emit_u8(cursor, 0xc3);
 }
@@ -138,6 +150,37 @@ static void __attribute__((unused)) emit_call(uint8_t **cursor, void *target) {
   emit_u8(cursor, 0x08);
 }
 
+static bool tb_is_single_nop(TB *tb) {
+  /* 第一版 codegen 只处理无副作用的单字节 nop。 */
+  return tb->nr_instr == 1 &&
+    tb->guest_end == tb->guest_start + 1 &&
+    vaddr_read(tb->guest_start, 1) == 0x90;
+}
+
+static void jit_compile_tb(TB *tb) {
+  if (tb == NULL || !tb->valid || !tb->sealed || tb->host_code != NULL) {
+    return;
+  }
+
+  if (!tb_is_single_nop(tb)) {
+    return;
+  }
+
+  uint8_t *code = jit_code_alloc(32);
+  uint8_t *cursor = code;
+
+  /* nop 不修改通用寄存器和 EFLAGS，native 代码只需要推进 eip。 */
+  emit_mov_rax_imm64(&cursor, (uint64_t)(uintptr_t)&cpu.eip);
+  emit_mov_m32_rax_imm32(&cursor, tb->exit_eip);
+  emit_return_status(&cursor, JIT_EXEC_OK);
+  jit_code_make_executable();
+
+  tb->host_code = code;
+  tb->host_size = cursor - code;
+  jit_state.stats.native_tbs ++;
+  jit_state.stats.native_instr += tb->nr_instr;
+}
+
 static void tb_seal(TB *tb) {
   if (tb == NULL || !tb->valid || tb->sealed) {
     return;
@@ -151,6 +194,7 @@ static void tb_seal(TB *tb) {
   if (jit_state.active_tb == tb) {
     jit_state.active_tb = NULL;
   }
+  jit_compile_tb(tb);
 }
 
 void jit_init(void) {
@@ -258,6 +302,21 @@ TB *jit_lookup_sealed(vaddr_t eip) {
   }
 
   return tb;
+}
+
+bool jit_tb_has_native(TB *tb) {
+  return tb != NULL && tb->valid && tb->sealed && tb->host_code != NULL;
+}
+
+int jit_exec_native(TB *tb) {
+  if (!jit_tb_has_native(tb)) {
+    jit_state.stats.native_fallbacks ++;
+    return JIT_EXEC_FALLBACK;
+  }
+
+  jit_func_t fn = (jit_func_t)tb->host_code;
+  jit_state.stats.native_calls ++;
+  return fn();
 }
 
 void jit_begin_tb_exec(TB *tb) {
