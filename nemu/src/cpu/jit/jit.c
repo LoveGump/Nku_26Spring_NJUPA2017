@@ -203,6 +203,11 @@ static void emit_mov_edx_imm32(uint8_t **cursor, uint32_t value) {
   emit_u32(cursor, value);
 }
 
+static void emit_mov_ecx_imm32(uint8_t **cursor, uint32_t value) {
+  emit_u8(cursor, 0xb9);
+  emit_u32(cursor, value);
+}
+
 static void emit_ret(uint8_t **cursor) {
   emit_u8(cursor, 0xc3);
 }
@@ -254,6 +259,15 @@ enum {
 };
 
 enum {
+  JIT_GP1_ADD = 0,
+  JIT_GP1_OR = 1,
+  JIT_GP1_AND = 4,
+  JIT_GP1_SUB = 5,
+  JIT_GP1_XOR = 6,
+  JIT_GP1_CMP = 7,
+};
+
+enum {
   JIT_MEM_MOFFS_READ = 0,
   JIT_MEM_MOFFS_WRITE = 1,
 };
@@ -268,6 +282,8 @@ enum {
   JIT_RET_NEAR = 1,
   JIT_RET_NEAR_IMM = 2,
 };
+
+static uint32_t jit_calc_rm_addr(uint32_t info, uint32_t disp);
 
 static int jit_helper_arith_r2r(uint32_t info, uint32_t exit_eip) {
   /* info: bit[2:0]=src，bit[5:3]=dest，bit[6]=add/sub。 */
@@ -384,6 +400,91 @@ static int jit_helper_compare_r2r(uint32_t info, uint32_t exit_eip) {
   return JIT_EXEC_OK;
 }
 
+static int jit_helper_gp1_imm8_reg(uint32_t info, uint32_t imm, uint32_t exit_eip) {
+  /* 0x83 group1: bit[2:0]=register，bit[5:3]=子操作，imm 已符号扩展到 32 位。 */
+  uint8_t reg = info & 0x7;
+  uint8_t op = (info >> 3) & 0x7;
+  uint32_t dest_val = cpu.gpr[reg]._32;
+  uint32_t result = 0;
+  bool write_back = op != JIT_GP1_CMP;
+
+  if (op == JIT_GP1_ADD) {
+    result = dest_val + imm;
+    cpu.CF = result < dest_val;
+    cpu.OF = ((~(dest_val ^ imm) & (dest_val ^ result)) >> 31) & 0x1;
+  }
+  else if (op == JIT_GP1_SUB || op == JIT_GP1_CMP) {
+    result = dest_val - imm;
+    cpu.CF = dest_val < imm;
+    cpu.OF = (((dest_val ^ imm) & (dest_val ^ result)) >> 31) & 0x1;
+  }
+  else {
+    if (op == JIT_GP1_OR) {
+      result = dest_val | imm;
+    }
+    else if (op == JIT_GP1_AND) {
+      result = dest_val & imm;
+    }
+    else {
+      result = dest_val ^ imm;
+    }
+    cpu.CF = 0;
+    cpu.OF = 0;
+  }
+
+  if (write_back) {
+    cpu.gpr[reg]._32 = result;
+  }
+  cpu.ZF = result == 0;
+  cpu.SF = (result >> 31) & 0x1;
+  cpu.eip = exit_eip;
+  return JIT_EXEC_OK;
+}
+
+static int jit_helper_gp1_imm8_rm32(uint32_t info, uint32_t disp,
+    uint32_t imm, uint32_t exit_eip) {
+  /*
+   * 0x83 访存形态复用地址编码。bit[3:1] 在 mov 中表示寄存器，
+   * 这里复用为 group1 子操作，地址计算不会读取这三位。
+   */
+  uint8_t op = (info >> 1) & 0x7;
+  uint32_t addr = jit_calc_rm_addr(info, disp);
+  uint32_t dest_val = vaddr_read(addr, 4);
+  uint32_t result = 0;
+
+  if (op == JIT_GP1_ADD) {
+    result = dest_val + imm;
+    cpu.CF = result < dest_val;
+    cpu.OF = ((~(dest_val ^ imm) & (dest_val ^ result)) >> 31) & 0x1;
+  }
+  else if (op == JIT_GP1_SUB || op == JIT_GP1_CMP) {
+    result = dest_val - imm;
+    cpu.CF = dest_val < imm;
+    cpu.OF = (((dest_val ^ imm) & (dest_val ^ result)) >> 31) & 0x1;
+  }
+  else {
+    if (op == JIT_GP1_OR) {
+      result = dest_val | imm;
+    }
+    else if (op == JIT_GP1_AND) {
+      result = dest_val & imm;
+    }
+    else {
+      result = dest_val ^ imm;
+    }
+    cpu.CF = 0;
+    cpu.OF = 0;
+  }
+
+  if (op != JIT_GP1_CMP) {
+    vaddr_write(addr, 4, result);
+  }
+  cpu.ZF = result == 0;
+  cpu.SF = (result >> 31) & 0x1;
+  cpu.eip = exit_eip;
+  return JIT_EXEC_OK;
+}
+
 static int jit_helper_moffs32(uint32_t addr, uint32_t exit_eip, uint32_t op) {
   /* moffs32 是指令里直接携带的线性地址；访存必须继续走 vaddr_*。 */
   if (op == JIT_MEM_MOFFS_READ) {
@@ -397,14 +498,12 @@ static int jit_helper_moffs32(uint32_t addr, uint32_t exit_eip, uint32_t op) {
   return JIT_EXEC_OK;
 }
 
-static int jit_helper_mov_rm32(uint32_t info, uint32_t disp, uint32_t exit_eip) {
+static uint32_t jit_calc_rm_addr(uint32_t info, uint32_t disp) {
   /*
    * info:
    * bit[0]=read/write，bit[3:1]=reg，bit[6:4]=base，bit[7]=has_base，
    * bit[10:8]=index，bit[11]=has_index，bit[13:12]=scale。
    */
-  uint8_t op = info & 0x1;
-  uint8_t reg = (info >> 1) & 0x7;
   uint8_t base = (info >> 4) & 0x7;
   uint8_t has_base = (info >> 7) & 0x1;
   uint8_t index = (info >> 8) & 0x7;
@@ -421,6 +520,14 @@ static int jit_helper_mov_rm32(uint32_t info, uint32_t disp, uint32_t exit_eip) 
     addr += cpu.gpr[index]._32 << scale;
   }
 
+  return addr;
+}
+
+static int jit_helper_mov_rm32(uint32_t info, uint32_t disp, uint32_t exit_eip) {
+  uint8_t op = info & 0x1;
+  uint8_t reg = (info >> 1) & 0x7;
+  uint32_t addr = jit_calc_rm_addr(info, disp);
+
   if (op == JIT_MEM_RM_READ) {
     cpu.gpr[reg]._32 = vaddr_read(addr, 4);
   }
@@ -428,6 +535,14 @@ static int jit_helper_mov_rm32(uint32_t info, uint32_t disp, uint32_t exit_eip) 
     vaddr_write(addr, 4, cpu.gpr[reg]._32);
   }
 
+  cpu.eip = exit_eip;
+  return JIT_EXEC_OK;
+}
+
+static int jit_helper_lea_m2g(uint32_t info, uint32_t disp, uint32_t exit_eip) {
+  /* lea 只计算有效地址并写入目标寄存器，不读取内存，也不修改 EFLAGS。 */
+  uint8_t reg = (info >> 1) & 0x7;
+  cpu.gpr[reg]._32 = jit_calc_rm_addr(info, disp);
   cpu.eip = exit_eip;
   return JIT_EXEC_OK;
 }
@@ -657,6 +772,121 @@ static bool tb_is_single_compare_r2r(TB *tb, uint8_t *op, uint8_t *src, uint8_t 
   return true;
 }
 
+static bool tb_is_single_gp1_imm8_reg(TB *tb, uint8_t *op, uint8_t *reg, uint32_t *imm) {
+  /* 0x83 /digit ib: 32 位 r/m 操作数配符号扩展 imm8；这里先只支持寄存器形式。 */
+  if (tb->nr_instr != 1 || tb->guest_end != tb->guest_start + 3) {
+    return false;
+  }
+
+  uint8_t opcode = vaddr_read(tb->guest_start, 1);
+  if (opcode != 0x83) {
+    return false;
+  }
+
+  uint8_t modrm = vaddr_read(tb->guest_start + 1, 1);
+  if ((modrm >> 6) != 3) {
+    return false;
+  }
+
+  uint8_t subop = (modrm >> 3) & 0x7;
+  if (subop != JIT_GP1_ADD && subop != JIT_GP1_OR &&
+      subop != JIT_GP1_AND && subop != JIT_GP1_SUB &&
+      subop != JIT_GP1_XOR && subop != JIT_GP1_CMP) {
+    return false;
+  }
+
+  *op = subop;
+  *reg = modrm & 0x7;
+  *imm = (uint32_t)(int32_t)(int8_t)vaddr_read(tb->guest_start + 2, 1);
+  return true;
+}
+
+static bool tb_is_single_gp1_imm8_rm32(TB *tb, uint8_t *op,
+    uint8_t *has_base, uint8_t *base, uint8_t *has_index,
+    uint8_t *index, uint8_t *scale, int32_t *disp, uint32_t *imm) {
+  /* 0x83 的内存形式，先只支持 32 位 r/m32 和 imm8。 */
+  if (tb->nr_instr != 1 || tb->guest_end < tb->guest_start + 3) {
+    return false;
+  }
+
+  uint8_t opcode = vaddr_read(tb->guest_start, 1);
+  if (opcode != 0x83) {
+    return false;
+  }
+
+  uint8_t modrm = vaddr_read(tb->guest_start + 1, 1);
+  uint8_t mod = modrm >> 6;
+  uint8_t rm = modrm & 0x7;
+  if (mod == 3) {
+    return false;
+  }
+
+  uint8_t subop = (modrm >> 3) & 0x7;
+  if (subop != JIT_GP1_ADD && subop != JIT_GP1_OR &&
+      subop != JIT_GP1_AND && subop != JIT_GP1_SUB &&
+      subop != JIT_GP1_XOR && subop != JIT_GP1_CMP) {
+    return false;
+  }
+
+  *op = subop;
+  *base = rm;
+  *has_base = true;
+  *index = 0;
+  *has_index = false;
+  *scale = 0;
+  *disp = 0;
+  uint32_t len = 2;
+
+  if (rm == R_ESP) {
+    if (tb->guest_end < tb->guest_start + 4) {
+      return false;
+    }
+
+    uint8_t sib = vaddr_read(tb->guest_start + 2, 1);
+    *scale = sib >> 6;
+    *index = (sib >> 3) & 0x7;
+    *base = sib & 0x7;
+    *has_index = *index != R_ESP;
+    *has_base = !(mod == 0 && *base == R_EBP);
+    len = 3;
+
+    if (mod == 0 && *base == R_EBP) {
+      *disp = vaddr_read(tb->guest_start + 3, 4);
+      len = 7;
+    }
+    else if (mod == 1) {
+      *disp = (int8_t)vaddr_read(tb->guest_start + 3, 1);
+      len = 4;
+    }
+    else if (mod == 2) {
+      *disp = vaddr_read(tb->guest_start + 3, 4);
+      len = 7;
+    }
+  }
+  else {
+    if (mod == 0 && rm == R_EBP) {
+      *has_base = false;
+      *disp = vaddr_read(tb->guest_start + 2, 4);
+      len = 6;
+    }
+    else if (mod == 1) {
+      *disp = (int8_t)vaddr_read(tb->guest_start + 2, 1);
+      len = 3;
+    }
+    else if (mod == 2) {
+      *disp = vaddr_read(tb->guest_start + 2, 4);
+      len = 6;
+    }
+  }
+
+  if (tb->guest_end != tb->guest_start + len + 1) {
+    return false;
+  }
+
+  *imm = (uint32_t)(int32_t)(int8_t)vaddr_read(tb->guest_start + len, 1);
+  return true;
+}
+
 static bool tb_is_single_moffs32(TB *tb, uint8_t *op, uint32_t *addr) {
   /* 0xa1: eax <- moffs32；0xa3: moffs32 <- eax，编码均为 opcode + imm32。 */
   if (tb->nr_instr != 1 || tb->guest_end != tb->guest_start + 5) {
@@ -757,6 +987,80 @@ static bool tb_is_single_mov_rm32(TB *tb, uint8_t *op, uint8_t *reg,
 
   *op = opcode == 0x8b ? JIT_MEM_RM_READ : JIT_MEM_RM_WRITE;
   return true;
+}
+
+static bool tb_is_single_lea_m2g(TB *tb, uint8_t *reg,
+    uint8_t *has_base, uint8_t *base, uint8_t *has_index,
+    uint8_t *index, uint8_t *scale, int32_t *disp) {
+  /* lea 使用 ModR/M 的内存地址编码，但结果是地址本身，而不是地址处的内存。 */
+  if (tb->nr_instr != 1 || tb->guest_end < tb->guest_start + 2) {
+    return false;
+  }
+
+  uint8_t opcode = vaddr_read(tb->guest_start, 1);
+  if (opcode != 0x8d) {
+    return false;
+  }
+
+  uint8_t modrm = vaddr_read(tb->guest_start + 1, 1);
+  uint8_t mod = modrm >> 6;
+  uint8_t rm = modrm & 0x7;
+  if (mod == 3) {
+    return false;
+  }
+
+  *reg = (modrm >> 3) & 0x7;
+  *base = rm;
+  *has_base = true;
+  *index = 0;
+  *has_index = false;
+  *scale = 0;
+  *disp = 0;
+  uint32_t len = 2;
+
+  if (rm == R_ESP) {
+    if (tb->guest_end < tb->guest_start + 3) {
+      return false;
+    }
+
+    uint8_t sib = vaddr_read(tb->guest_start + 2, 1);
+    *scale = sib >> 6;
+    *index = (sib >> 3) & 0x7;
+    *base = sib & 0x7;
+    *has_index = *index != R_ESP;
+    *has_base = !(mod == 0 && *base == R_EBP);
+    len = 3;
+
+    if (mod == 0 && *base == R_EBP) {
+      *disp = vaddr_read(tb->guest_start + 3, 4);
+      len = 7;
+    }
+    else if (mod == 1) {
+      *disp = (int8_t)vaddr_read(tb->guest_start + 3, 1);
+      len = 4;
+    }
+    else if (mod == 2) {
+      *disp = vaddr_read(tb->guest_start + 3, 4);
+      len = 7;
+    }
+  }
+  else {
+    if (mod == 0 && rm == R_EBP) {
+      *has_base = false;
+      *disp = vaddr_read(tb->guest_start + 2, 4);
+      len = 6;
+    }
+    else if (mod == 1) {
+      *disp = (int8_t)vaddr_read(tb->guest_start + 2, 1);
+      len = 3;
+    }
+    else if (mod == 2) {
+      *disp = vaddr_read(tb->guest_start + 2, 4);
+      len = 6;
+    }
+  }
+
+  return tb->guest_end == tb->guest_start + len;
 }
 
 static bool tb_is_single_direct_jmp(TB *tb) {
@@ -894,6 +1198,21 @@ static void jit_compile_tb(TB *tb) {
   uint8_t compare_dest = 0;
   bool is_compare_r2r =
     tb_is_single_compare_r2r(tb, &compare_op, &compare_src, &compare_dest);
+  uint8_t gp1_op = 0;
+  uint8_t gp1_reg = 0;
+  uint32_t gp1_imm = 0;
+  bool is_gp1_imm8_reg = tb_is_single_gp1_imm8_reg(tb, &gp1_op, &gp1_reg, &gp1_imm);
+  uint8_t gp1_rm_op = 0;
+  uint8_t gp1_rm_has_base = 0;
+  uint8_t gp1_rm_base = 0;
+  uint8_t gp1_rm_has_index = 0;
+  uint8_t gp1_rm_index = 0;
+  uint8_t gp1_rm_scale = 0;
+  int32_t gp1_rm_disp = 0;
+  uint32_t gp1_rm_imm = 0;
+  bool is_gp1_imm8_rm32 = tb_is_single_gp1_imm8_rm32(tb, &gp1_rm_op,
+      &gp1_rm_has_base, &gp1_rm_base, &gp1_rm_has_index, &gp1_rm_index,
+      &gp1_rm_scale, &gp1_rm_disp, &gp1_rm_imm);
   uint8_t moffs_op = 0;
   uint32_t moffs_addr = 0;
   bool is_moffs32 = tb_is_single_moffs32(tb, &moffs_op, &moffs_addr);
@@ -907,6 +1226,15 @@ static void jit_compile_tb(TB *tb) {
   int32_t mem_disp = 0;
   bool is_mov_rm32 = tb_is_single_mov_rm32(tb, &mem_op, &mem_reg,
       &mem_has_base, &mem_base, &mem_has_index, &mem_index, &mem_scale, &mem_disp);
+  uint8_t lea_reg = 0;
+  uint8_t lea_has_base = 0;
+  uint8_t lea_base = 0;
+  uint8_t lea_has_index = 0;
+  uint8_t lea_index = 0;
+  uint8_t lea_scale = 0;
+  int32_t lea_disp = 0;
+  bool is_lea_m2g = tb_is_single_lea_m2g(tb, &lea_reg,
+      &lea_has_base, &lea_base, &lea_has_index, &lea_index, &lea_scale, &lea_disp);
   bool is_direct_jmp = tb_is_single_direct_jmp(tb);
   uint8_t jcc_subcode = 0;
   uint32_t jcc_target = 0;
@@ -918,8 +1246,8 @@ static void jit_compile_tb(TB *tb) {
   bool is_call_ret = tb_is_single_call_ret(tb, &call_op, &call_target, &call_fallthrough);
   if (!is_nop && !is_mov_i2r && !is_mov_r2r &&
       !is_arith_r2r && !is_logic_r2r && !is_unary_reg &&
-      !is_compare_r2r && !is_moffs32 && !is_mov_rm32 && !is_direct_jmp &&
-      !is_jcc && !is_call_ret) {
+      !is_compare_r2r && !is_gp1_imm8_reg && !is_moffs32 && !is_mov_rm32 &&
+      !is_gp1_imm8_rm32 && !is_lea_m2g && !is_direct_jmp && !is_jcc && !is_call_ret) {
     return;
   }
 
@@ -1001,6 +1329,40 @@ static void jit_compile_tb(TB *tb) {
     jit_state.stats.native_instr += tb->nr_instr;
     return;
   }
+  else if (is_gp1_imm8_reg) {
+    /* 0x83 的 imm8 由 helper 使用 32 位符号扩展值参与运算。 */
+    uint32_t info = gp1_reg | (gp1_op << 3);
+    emit_mov_edi_imm32(&cursor, info);
+    emit_mov_esi_imm32(&cursor, gp1_imm);
+    emit_mov_edx_imm32(&cursor, tb->exit_eip);
+    emit_call(&cursor, jit_helper_gp1_imm8_reg);
+    emit_ret(&cursor);
+    jit_code_make_executable();
+
+    tb->host_code = jit_code_exec_ptr(code);
+    tb->host_size = cursor - code;
+    jit_state.stats.native_tbs ++;
+    jit_state.stats.native_instr += tb->nr_instr;
+    return;
+  }
+  else if (is_gp1_imm8_rm32) {
+    uint32_t info = (gp1_rm_op << 1) | (gp1_rm_base << 4) |
+      (gp1_rm_has_base << 7) | (gp1_rm_index << 8) | (gp1_rm_has_index << 11) |
+      (gp1_rm_scale << 12);
+    emit_mov_edi_imm32(&cursor, info);
+    emit_mov_esi_imm32(&cursor, gp1_rm_disp);
+    emit_mov_edx_imm32(&cursor, gp1_rm_imm);
+    emit_mov_ecx_imm32(&cursor, tb->exit_eip);
+    emit_call(&cursor, jit_helper_gp1_imm8_rm32);
+    emit_ret(&cursor);
+    jit_code_make_executable();
+
+    tb->host_code = jit_code_exec_ptr(code);
+    tb->host_size = cursor - code;
+    jit_state.stats.native_tbs ++;
+    jit_state.stats.native_instr += tb->nr_instr;
+    return;
+  }
   else if (is_moffs32) {
     /* 直接地址 mov 通过 vaddr_read/write helper 保留分页和 MMIO 语义。 */
     emit_mov_edi_imm32(&cursor, moffs_addr);
@@ -1025,6 +1387,23 @@ static void jit_compile_tb(TB *tb) {
     emit_mov_esi_imm32(&cursor, mem_disp);
     emit_mov_edx_imm32(&cursor, tb->exit_eip);
     emit_call(&cursor, jit_helper_mov_rm32);
+    emit_ret(&cursor);
+    jit_code_make_executable();
+
+    tb->host_code = jit_code_exec_ptr(code);
+    tb->host_size = cursor - code;
+    jit_state.stats.native_tbs ++;
+    jit_state.stats.native_instr += tb->nr_instr;
+    return;
+  }
+  else if (is_lea_m2g) {
+    uint32_t info = JIT_MEM_RM_READ | (lea_reg << 1) | (lea_base << 4) |
+      (lea_has_base << 7) | (lea_index << 8) | (lea_has_index << 11) |
+      (lea_scale << 12);
+    emit_mov_edi_imm32(&cursor, info);
+    emit_mov_esi_imm32(&cursor, lea_disp);
+    emit_mov_edx_imm32(&cursor, tb->exit_eip);
+    emit_call(&cursor, jit_helper_lea_m2g);
     emit_ret(&cursor);
     jit_code_make_executable();
 
@@ -1264,6 +1643,7 @@ TB *jit_lookup_sealed(vaddr_t eip) {
     }
     if (tb->host_code == NULL) {
       jit_state.stats.compile_unsupported ++;
+      jit_state.stats.unsupported_opcode[vaddr_read(tb->guest_start, 1)] ++;
     }
   }
 

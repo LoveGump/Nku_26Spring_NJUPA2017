@@ -77,6 +77,31 @@ static void display_jit_stats(void) {
   printf("Code cache: bytes=%" PRIu64 ", flushes=%" PRIu64
          ", invalidations=%" PRIu64 "\n",
       stats->code_bytes, stats->code_flushes, stats->invalidations);
+
+  bool printed_header = false;
+  bool used[256] = {};
+  for (int rank = 0; rank < 5; rank ++) {
+    int best = -1;
+    for (int opcode = 0; opcode < 256; opcode ++) {
+      if (!used[opcode] && stats->unsupported_opcode[opcode] != 0 &&
+          (best < 0 || stats->unsupported_opcode[opcode] > stats->unsupported_opcode[best])) {
+        best = opcode;
+      }
+    }
+    if (best < 0) {
+      break;
+    }
+
+    if (!printed_header) {
+      printf("Unsupported opcodes:");
+      printed_header = true;
+    }
+    printf(" 0x%02x=%" PRIu64, best, stats->unsupported_opcode[best]);
+    used[best] = true;
+  }
+  if (printed_header) {
+    printf("\n");
+  }
 #else
   printf("JIT is disabled in this build.\n");
 #endif

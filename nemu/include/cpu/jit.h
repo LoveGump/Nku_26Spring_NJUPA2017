@@ -54,6 +54,7 @@ typedef struct {
   uint64_t code_self_tests;
   uint64_t compile_attempts;
   uint64_t compile_unsupported;
+  uint64_t unsupported_opcode[256];
   uint64_t native_tbs;
   uint64_t native_instr;
   uint64_t native_calls;
