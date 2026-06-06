@@ -78,6 +78,7 @@ TB *tb_alloc(vaddr_t eip) {
   tb->sealed = false;
   tb->guest_start = eip;
   tb->guest_end = eip;
+  tb->exit_eip = eip;
   tb->nr_instr = 0;
   tb->hit_count = 0;
   tb->host_code = NULL;
@@ -102,7 +103,35 @@ const JITStats *jit_get_stats(void) {
   return &jit_state.stats;
 }
 
-void jit_record_instr(vaddr_t start, vaddr_t end, bool end_of_tb) {
+TB *jit_lookup_sealed(vaddr_t eip) {
+  TB *tb = tb_lookup(eip);
+  if (tb == NULL || !tb->sealed) {
+    return NULL;
+  }
+
+  return tb;
+}
+
+void jit_begin_tb_exec(TB *tb) {
+  if (tb == NULL || !tb->valid || !tb->sealed) {
+    return;
+  }
+
+  jit_state.ignoring_sealed_tb = true;
+  jit_state.ignore_until = tb->guest_end;
+  jit_state.stats.executed_tbs ++;
+}
+
+void jit_end_tb_exec(uint32_t nr_instr, bool aborted) {
+  jit_state.ignoring_sealed_tb = false;
+  jit_state.ignore_until = 0;
+  jit_state.stats.executed_instr += nr_instr;
+  if (aborted) {
+    jit_state.stats.aborted_tbs ++;
+  }
+}
+
+void jit_record_instr(vaddr_t start, vaddr_t end, vaddr_t next_eip, bool end_of_tb) {
   if (!jit_state.enabled || start == end) {
     return;
   }
@@ -116,7 +145,7 @@ void jit_record_instr(vaddr_t start, vaddr_t end, bool end_of_tb) {
   }
 
   TB *tb = jit_state.active_tb;
-  if (tb == NULL || !tb->valid || tb->sealed || tb->guest_end != start) {
+  if (tb == NULL || !tb->valid || tb->sealed || tb->exit_eip != start) {
     tb = tb_lookup(start);
     if (tb != NULL && tb->sealed) {
       jit_state.ignoring_sealed_tb = true;
@@ -133,6 +162,7 @@ void jit_record_instr(vaddr_t start, vaddr_t end, bool end_of_tb) {
   }
 
   tb->guest_end = end;
+  tb->exit_eip = next_eip;
   tb->nr_instr ++;
   jit_state.stats.recorded_instr ++;
 

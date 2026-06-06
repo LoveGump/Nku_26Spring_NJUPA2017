@@ -251,6 +251,21 @@ static inline void update_eip(void) {
   cpu.eip = (decoding.is_jmp ? (decoding.is_jmp = 0, decoding.jmp_eip) : decoding.seq_eip);
 }
 
+static inline bool is_control_flow_opcode(void) {
+  uint32_t opcode = decoding.opcode;
+
+  if ((opcode >= 0x70 && opcode <= 0x7f) || (opcode >= 0x180 && opcode <= 0x18f)) {
+    return true;
+  }
+
+  if (opcode == 0xc3 || opcode == 0xcd || opcode == 0xcf ||
+      opcode == 0xe8 || opcode == 0xe9 || opcode == 0xeb) {
+    return true;
+  }
+
+  return opcode == 0xff && (decoding.ext_opcode == 2 || decoding.ext_opcode == 4);
+}
+
 void exec_wrapper(bool print_flag) {
 #ifdef DEBUG
   decoding.p = decoding.asm_buf;
@@ -276,12 +291,12 @@ void exec_wrapper(bool print_flag) {
 #endif
   vaddr_t instr_start = cpu.eip;
   vaddr_t instr_end = decoding.seq_eip;
-  bool end_of_tb = decoding.is_jmp || (cpu.INTR && cpu.IF) || (nemu_state != NEMU_RUNNING);
+  bool end_of_tb = is_control_flow_opcode() || (cpu.INTR && cpu.IF) || (nemu_state != NEMU_RUNNING);
 
   // 更新 eip 的值
   update_eip();
 
-  jit_record_instr(instr_start, instr_end, end_of_tb);
+  jit_record_instr(instr_start, instr_end, cpu.eip, end_of_tb);
 
   if (cpu.INTR && cpu.IF) {
     cpu.INTR = false;

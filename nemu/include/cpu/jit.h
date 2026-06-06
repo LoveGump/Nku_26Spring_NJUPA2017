@@ -13,6 +13,7 @@ typedef struct TranslationBlock {
   bool sealed;
   vaddr_t guest_start;
   vaddr_t guest_end;
+  vaddr_t exit_eip;
   uint32_t nr_instr;
   uint64_t hit_count;
   void *host_code;
@@ -28,6 +29,9 @@ typedef struct {
   uint64_t total_instr;
   uint64_t recorded_instr;
   uint64_t sealed_tbs;
+  uint64_t executed_tbs;
+  uint64_t executed_instr;
+  uint64_t aborted_tbs;
   uint32_t max_tb_instr;
 } JITStats;
 
@@ -38,14 +42,17 @@ TB *tb_lookup(vaddr_t eip);
 TB *tb_alloc(vaddr_t eip);
 void tb_invalidate(TB *tb);
 const JITStats *jit_get_stats(void);
-void jit_record_instr(vaddr_t start, vaddr_t end, bool end_of_tb);
+void jit_record_instr(vaddr_t start, vaddr_t end, vaddr_t next_eip, bool end_of_tb);
+TB *jit_lookup_sealed(vaddr_t eip);
+void jit_begin_tb_exec(TB *tb);
+void jit_end_tb_exec(uint32_t nr_instr, bool aborted);
 
 #else
 
 static inline void jit_init(void) {}
 static inline void jit_reset(void) {}
 static inline void jit_invalidate_all(void) {}
-static inline void jit_record_instr(vaddr_t start, vaddr_t end, bool end_of_tb) {}
+static inline void jit_record_instr(vaddr_t start, vaddr_t end, vaddr_t next_eip, bool end_of_tb) {}
 
 #endif
 
