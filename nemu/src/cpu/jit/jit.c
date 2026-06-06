@@ -205,6 +205,11 @@ enum {
   JIT_MEM_RM_WRITE = 1,
 };
 
+enum {
+  JIT_CALL_DIRECT = 0,
+  JIT_RET_NEAR = 1,
+};
+
 static int jit_helper_arith_r2r(uint32_t info, uint32_t exit_eip) {
   /* info: bit[2:0]=src，bit[5:3]=dest，bit[6]=add/sub。 */
   uint8_t src = info & 0x7;
@@ -392,6 +397,22 @@ static bool jit_eval_cc(uint8_t subcode) {
 static int jit_helper_jcc(uint32_t subcode, uint32_t target, uint32_t fallthrough) {
   /* 条件跳转必须每次根据当前 EFLAGS 重新判断，不能固定使用 trace 出口。 */
   cpu.eip = jit_eval_cc(subcode) ? target : fallthrough;
+  return JIT_EXEC_OK;
+}
+
+static int jit_helper_call_ret(uint32_t op, uint32_t target, uint32_t fallthrough) {
+  if (op == JIT_CALL_DIRECT) {
+    /* call rel32 压入返回地址，再跳到直接目标。 */
+    cpu.esp -= 4;
+    vaddr_write(cpu.esp, 4, fallthrough);
+    cpu.eip = target;
+  }
+  else {
+    /* ret 的目标由运行时栈内容决定，不能在翻译阶段固定。 */
+    cpu.eip = vaddr_read(cpu.esp, 4);
+    cpu.esp += 4;
+  }
+
   return JIT_EXEC_OK;
 }
 
@@ -740,6 +761,36 @@ static bool tb_is_single_jcc(TB *tb, uint8_t *subcode,
   return false;
 }
 
+static bool tb_is_single_call_ret(TB *tb, uint8_t *op,
+    uint32_t *target, uint32_t *fallthrough) {
+  if (tb->nr_instr != 1) {
+    return false;
+  }
+
+  uint8_t opcode = vaddr_read(tb->guest_start, 1);
+  if (opcode == 0xe8) {
+    if (tb->guest_end != tb->guest_start + 5) {
+      return false;
+    }
+
+    *op = JIT_CALL_DIRECT;
+    /* rel32 和 jmp 一样，相对下一条指令地址计算目标。 */
+    *fallthrough = tb->guest_start + 5;
+    *target = *fallthrough + (int32_t)vaddr_read(tb->guest_start + 1, 4);
+    return true;
+  }
+
+  if (opcode == 0xc3) {
+    /* ret 只有 opcode 自身，真实返回地址留到 helper 执行时从栈中读取。 */
+    *op = JIT_RET_NEAR;
+    *fallthrough = 0;
+    *target = 0;
+    return tb->guest_end == tb->guest_start + 1;
+  }
+
+  return false;
+}
+
 static void jit_compile_tb(TB *tb) {
   if (tb == NULL || !tb->valid || !tb->sealed || tb->host_code != NULL) {
     return;
@@ -786,10 +837,14 @@ static void jit_compile_tb(TB *tb) {
   uint32_t jcc_target = 0;
   uint32_t jcc_fallthrough = 0;
   bool is_jcc = tb_is_single_jcc(tb, &jcc_subcode, &jcc_target, &jcc_fallthrough);
+  uint8_t call_op = 0;
+  uint32_t call_target = 0;
+  uint32_t call_fallthrough = 0;
+  bool is_call_ret = tb_is_single_call_ret(tb, &call_op, &call_target, &call_fallthrough);
   if (!is_nop && !is_mov_i2r && !is_mov_r2r &&
       !is_arith_r2r && !is_logic_r2r && !is_unary_reg &&
       !is_compare_r2r && !is_moffs32 && !is_mov_rm32 && !is_direct_jmp &&
-      !is_jcc) {
+      !is_jcc && !is_call_ret) {
     return;
   }
 
@@ -919,6 +974,21 @@ static void jit_compile_tb(TB *tb) {
     emit_mov_esi_imm32(&cursor, jcc_target);
     emit_mov_edx_imm32(&cursor, jcc_fallthrough);
     emit_call(&cursor, jit_helper_jcc);
+    emit_ret(&cursor);
+    jit_code_make_executable();
+
+    tb->host_code = code;
+    tb->host_size = cursor - code;
+    jit_state.stats.native_tbs ++;
+    jit_state.stats.native_instr += tb->nr_instr;
+    return;
+  }
+  else if (is_call_ret) {
+    /* call/ret 通过 helper 维护 guest 栈，避免绕过 vaddr_read/write。 */
+    emit_mov_edi_imm32(&cursor, call_op);
+    emit_mov_esi_imm32(&cursor, call_target);
+    emit_mov_edx_imm32(&cursor, call_fallthrough);
+    emit_call(&cursor, jit_helper_call_ret);
     emit_ret(&cursor);
     jit_code_make_executable();
 
