@@ -185,6 +185,11 @@ enum {
   JIT_UNARY_DEC = 1,
 };
 
+enum {
+  JIT_COMPARE_CMP = 0,
+  JIT_COMPARE_TEST = 1,
+};
+
 static int jit_helper_arith_r2r(uint32_t info, uint32_t exit_eip) {
   /* info: bit[2:0]=src，bit[5:3]=dest，bit[6]=add/sub。 */
   uint8_t src = info & 0x7;
@@ -265,6 +270,35 @@ static int jit_helper_unary_reg(uint32_t info, uint32_t exit_eip) {
 
   /* inc/dec 不修改 CF，只更新结果相关的 ZF、SF、OF。 */
   cpu.gpr[reg]._32 = result;
+  cpu.ZF = result == 0;
+  cpu.SF = (result >> 31) & 0x1;
+  cpu.eip = exit_eip;
+  return JIT_EXEC_OK;
+}
+
+static int jit_helper_compare_r2r(uint32_t info, uint32_t exit_eip) {
+  /* info: bit[2:0]=src，bit[5:3]=dest，bit[6]=cmp/test。 */
+  uint8_t src = info & 0x7;
+  uint8_t dest = (info >> 3) & 0x7;
+  uint8_t op = (info >> 6) & 0x1;
+  uint32_t dest_val = cpu.gpr[dest]._32;
+  uint32_t src_val = cpu.gpr[src]._32;
+  uint32_t result = 0;
+
+  if (op == JIT_COMPARE_CMP) {
+    /* cmp 复用 sub 的标志位公式，但不写回减法结果。 */
+    result = dest_val - src_val;
+    cpu.CF = dest_val < src_val;
+    cpu.OF = (((dest_val ^ src_val) & (dest_val ^ result)) >> 31) & 0x1;
+  }
+  else {
+    /* test 复用 and 的标志位语义，CF/OF 固定清零。 */
+    result = dest_val & src_val;
+    cpu.CF = 0;
+    cpu.OF = 0;
+  }
+
+  /* cmp/test 只更新标志位，不把临时结果写回客户寄存器。 */
   cpu.ZF = result == 0;
   cpu.SF = (result >> 31) & 0x1;
   cpu.eip = exit_eip;
@@ -417,6 +451,38 @@ static bool tb_is_single_unary_reg(TB *tb, uint8_t *op, uint8_t *reg) {
   return true;
 }
 
+static bool tb_is_single_compare_r2r(TB *tb, uint8_t *op, uint8_t *src, uint8_t *dest) {
+  /* 只识别寄存器形态的 cmp/test；访存形态留给解释器处理。 */
+  if (tb->nr_instr != 1 || tb->guest_end != tb->guest_start + 2) {
+    return false;
+  }
+
+  uint8_t opcode = vaddr_read(tb->guest_start, 1);
+  if (opcode != 0x39 && opcode != 0x3b && opcode != 0x85) {
+    return false;
+  }
+
+  uint8_t modrm = vaddr_read(tb->guest_start + 1, 1);
+  if ((modrm >> 6) != 3) {
+    return false;
+  }
+
+  uint8_t reg = (modrm >> 3) & 0x7;
+  uint8_t rm = modrm & 0x7;
+  /* 0x39/0x85 写 flags(r/m -/and reg)；0x3b 写 flags(reg - r/m)。 */
+  if (opcode == 0x3b) {
+    *src = rm;
+    *dest = reg;
+  }
+  else {
+    *src = reg;
+    *dest = rm;
+  }
+  *op = opcode == 0x85 ? JIT_COMPARE_TEST : JIT_COMPARE_CMP;
+
+  return true;
+}
+
 static void jit_compile_tb(TB *tb) {
   if (tb == NULL || !tb->valid || !tb->sealed || tb->host_code != NULL) {
     return;
@@ -440,8 +506,13 @@ static void jit_compile_tb(TB *tb) {
   uint8_t unary_op = 0;
   uint8_t unary_reg = 0;
   bool is_unary_reg = tb_is_single_unary_reg(tb, &unary_op, &unary_reg);
+  uint8_t compare_op = 0;
+  uint8_t compare_src = 0;
+  uint8_t compare_dest = 0;
+  bool is_compare_r2r =
+    tb_is_single_compare_r2r(tb, &compare_op, &compare_src, &compare_dest);
   if (!is_nop && !is_mov_i2r && !is_mov_r2r &&
-      !is_arith_r2r && !is_logic_r2r && !is_unary_reg) {
+      !is_arith_r2r && !is_logic_r2r && !is_unary_reg && !is_compare_r2r) {
     return;
   }
 
@@ -495,6 +566,21 @@ static void jit_compile_tb(TB *tb) {
     emit_mov_edi_imm32(&cursor, info);
     emit_mov_esi_imm32(&cursor, tb->exit_eip);
     emit_call(&cursor, jit_helper_unary_reg);
+    emit_ret(&cursor);
+    jit_code_make_executable();
+
+    tb->host_code = code;
+    tb->host_size = cursor - code;
+    jit_state.stats.native_tbs ++;
+    jit_state.stats.native_instr += tb->nr_instr;
+    return;
+  }
+  else if (is_compare_r2r) {
+    /* cmp/test 不写寄存器，只通过 helper 更新标志位并推进 eip。 */
+    uint32_t info = compare_src | (compare_dest << 3) | (compare_op << 6);
+    emit_mov_edi_imm32(&cursor, info);
+    emit_mov_esi_imm32(&cursor, tb->exit_eip);
+    emit_call(&cursor, jit_helper_compare_r2r);
     emit_ret(&cursor);
     jit_code_make_executable();
 

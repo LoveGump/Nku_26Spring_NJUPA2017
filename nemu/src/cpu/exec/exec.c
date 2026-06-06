@@ -261,7 +261,9 @@ static inline bool is_tb_boundary_opcode(void) {
       opcode == 0x21 || opcode == 0x23 ||
       opcode == 0x29 || opcode == 0x2b ||
       opcode == 0x31 || opcode == 0x33 ||
+      opcode == 0x39 || opcode == 0x3b ||
       (opcode >= 0x40 && opcode <= 0x4f) ||
+      opcode == 0x85 ||
       opcode == 0x89 || opcode == 0x8b ||
       opcode == 0x90 || (opcode >= 0xb8 && opcode <= 0xbf)) {
     return true;
