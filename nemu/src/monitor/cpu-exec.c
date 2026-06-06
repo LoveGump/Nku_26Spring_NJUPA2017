@@ -40,6 +40,14 @@ static bool exec_one_instr(bool print_flag) {
 
 #ifdef CONFIG_JIT
 static uint64_t exec_native_tb(TB *tb, uint64_t n, bool print_flag) {
+#ifdef DIFF_TEST
+  /*
+   * difftest 需要逐条同步，native TB 会跨过 exec_wrapper() 中的 difftest_step()；
+   * cached TB 仍逐条解释执行，因此只禁用 native 路径。
+   */
+  return 0;
+#endif
+
   if (print_flag || tb->nr_instr > n || !jit_tb_has_native(tb)) {
     return 0;
   }
