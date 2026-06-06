@@ -180,6 +180,11 @@ enum {
   JIT_LOGIC_XOR = 2,
 };
 
+enum {
+  JIT_UNARY_INC = 0,
+  JIT_UNARY_DEC = 1,
+};
+
 static int jit_helper_arith_r2r(uint32_t info, uint32_t exit_eip) {
   /* info: bit[2:0]=src，bit[5:3]=dest，bit[6]=add/sub。 */
   uint8_t src = info & 0x7;
@@ -234,6 +239,32 @@ static int jit_helper_logic_r2r(uint32_t info, uint32_t exit_eip) {
   /* x86 逻辑运算按结果更新 ZF/SF，并把 CF/OF 清零。 */
   cpu.CF = 0;
   cpu.OF = 0;
+  cpu.ZF = result == 0;
+  cpu.SF = (result >> 31) & 0x1;
+  cpu.eip = exit_eip;
+  return JIT_EXEC_OK;
+}
+
+static int jit_helper_unary_reg(uint32_t info, uint32_t exit_eip) {
+  /* info: bit[2:0]=register，bit[3]=inc/dec。 */
+  uint8_t reg = info & 0x7;
+  uint8_t op = (info >> 3) & 0x1;
+  uint32_t old_value = cpu.gpr[reg]._32;
+  uint32_t result = 0;
+
+  if (op == JIT_UNARY_INC) {
+    /* 最大正数加一变成最小负数时产生有符号溢出。 */
+    result = old_value + 1;
+    cpu.OF = old_value == 0x7fffffff;
+  }
+  else {
+    /* 最小负数减一变成最大正数时产生有符号溢出。 */
+    result = old_value - 1;
+    cpu.OF = old_value == 0x80000000;
+  }
+
+  /* inc/dec 不修改 CF，只更新结果相关的 ZF、SF、OF。 */
+  cpu.gpr[reg]._32 = result;
   cpu.ZF = result == 0;
   cpu.SF = (result >> 31) & 0x1;
   cpu.eip = exit_eip;
@@ -370,6 +401,22 @@ static bool tb_is_single_logic_r2r(TB *tb, uint8_t *op, uint8_t *src, uint8_t *d
   return true;
 }
 
+static bool tb_is_single_unary_reg(TB *tb, uint8_t *op, uint8_t *reg) {
+  /* 0x40..0x47 编码 INC，0x48..0x4f 编码 DEC，低 3 位选择寄存器。 */
+  if (tb->nr_instr != 1 || tb->guest_end != tb->guest_start + 1) {
+    return false;
+  }
+
+  uint8_t opcode = vaddr_read(tb->guest_start, 1);
+  if (opcode < 0x40 || opcode > 0x4f) {
+    return false;
+  }
+
+  *reg = opcode & 0x7;
+  *op = opcode < 0x48 ? JIT_UNARY_INC : JIT_UNARY_DEC;
+  return true;
+}
+
 static void jit_compile_tb(TB *tb) {
   if (tb == NULL || !tb->valid || !tb->sealed || tb->host_code != NULL) {
     return;
@@ -390,7 +437,11 @@ static void jit_compile_tb(TB *tb) {
   uint8_t logic_src = 0;
   uint8_t logic_dest = 0;
   bool is_logic_r2r = tb_is_single_logic_r2r(tb, &logic_op, &logic_src, &logic_dest);
-  if (!is_nop && !is_mov_i2r && !is_mov_r2r && !is_arith_r2r && !is_logic_r2r) {
+  uint8_t unary_op = 0;
+  uint8_t unary_reg = 0;
+  bool is_unary_reg = tb_is_single_unary_reg(tb, &unary_op, &unary_reg);
+  if (!is_nop && !is_mov_i2r && !is_mov_r2r &&
+      !is_arith_r2r && !is_logic_r2r && !is_unary_reg) {
     return;
   }
 
@@ -430,6 +481,20 @@ static void jit_compile_tb(TB *tb) {
     emit_mov_edi_imm32(&cursor, info);
     emit_mov_esi_imm32(&cursor, tb->exit_eip);
     emit_call(&cursor, jit_helper_logic_r2r);
+    emit_ret(&cursor);
+    jit_code_make_executable();
+
+    tb->host_code = code;
+    tb->host_size = cursor - code;
+    jit_state.stats.native_tbs ++;
+    jit_state.stats.native_instr += tb->nr_instr;
+    return;
+  }
+  else if (is_unary_reg) {
+    uint32_t info = unary_reg | (unary_op << 3);
+    emit_mov_edi_imm32(&cursor, info);
+    emit_mov_esi_imm32(&cursor, tb->exit_eip);
+    emit_call(&cursor, jit_helper_unary_reg);
     emit_ret(&cursor);
     jit_code_make_executable();
 
