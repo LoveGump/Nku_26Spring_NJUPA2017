@@ -34,11 +34,23 @@ make_EHelper(call) {
 }
 
 make_EHelper(ret) {
+  uint32_t stack_adjust = 0;
+  if (decoding.opcode == 0xc2) {
+    /* ret imm16 除弹出返回地址外，还由被调用者额外清理参数。 */
+    stack_adjust = instr_fetch(eip, 2);
+  }
+
   // 从栈顶弹出返回地址，更新 eip
   rtl_pop(&decoding.jmp_eip);
+  cpu.esp += stack_adjust;
   decoding.is_jmp = 1; 
 
-  print_asm("ret");
+  if (stack_adjust == 0) {
+    print_asm("ret");
+  }
+  else {
+    print_asm("ret $0x%x", stack_adjust);
+  }
 }
 
 make_EHelper(call_rm) {

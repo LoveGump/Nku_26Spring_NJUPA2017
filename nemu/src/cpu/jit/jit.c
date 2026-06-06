@@ -208,6 +208,7 @@ enum {
 enum {
   JIT_CALL_DIRECT = 0,
   JIT_RET_NEAR = 1,
+  JIT_RET_NEAR_IMM = 2,
 };
 
 static int jit_helper_arith_r2r(uint32_t info, uint32_t exit_eip) {
@@ -411,6 +412,10 @@ static int jit_helper_call_ret(uint32_t op, uint32_t target, uint32_t fallthroug
     /* ret 的目标由运行时栈内容决定，不能在翻译阶段固定。 */
     cpu.eip = vaddr_read(cpu.esp, 4);
     cpu.esp += 4;
+    if (op == JIT_RET_NEAR_IMM) {
+      /* ret imm16 再额外弹出调用参数；target 参数复用为清栈字节数。 */
+      cpu.esp += target;
+    }
   }
 
   return JIT_EXEC_OK;
@@ -786,6 +791,18 @@ static bool tb_is_single_call_ret(TB *tb, uint8_t *op,
     *fallthrough = 0;
     *target = 0;
     return tb->guest_end == tb->guest_start + 1;
+  }
+
+  if (opcode == 0xc2) {
+    if (tb->guest_end != tb->guest_start + 3) {
+      return false;
+    }
+
+    /* ret imm16 的立即数表示弹出返回地址后还要额外清理的参数字节数。 */
+    *op = JIT_RET_NEAR_IMM;
+    *target = vaddr_read(tb->guest_start + 1, 2);
+    *fallthrough = 0;
+    return true;
   }
 
   return false;

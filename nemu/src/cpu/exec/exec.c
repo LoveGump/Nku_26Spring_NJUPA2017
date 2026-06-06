@@ -135,7 +135,7 @@ opcode_entry opcode_table [512] = {
   /* 0xb4 */	IDEXW(mov_I2r, mov, 1), IDEXW(mov_I2r, mov, 1), IDEXW(mov_I2r, mov, 1), IDEXW(mov_I2r, mov, 1),
   /* 0xb8 */	IDEX(mov_I2r, mov), IDEX(mov_I2r, mov), IDEX(mov_I2r, mov), IDEX(mov_I2r, mov),
   /* 0xbc */	IDEX(mov_I2r, mov), IDEX(mov_I2r, mov), IDEX(mov_I2r, mov), IDEX(mov_I2r, mov),
-  /* 0xc0 */	IDEXW(gp2_Ib2E, gp2, 1), IDEX(gp2_Ib2E, gp2), EMPTY, EX(ret),
+  /* 0xc0 */	IDEXW(gp2_Ib2E, gp2, 1), IDEX(gp2_Ib2E, gp2), EX(ret), EX(ret),  // 0xc2/0xc3 共用 ret helper
   /* 0xc4 */	EMPTY, EMPTY, IDEXW(mov_I2E, mov, 1), IDEX(mov_I2E, mov),
   /* 0xc8 */	EMPTY, EX(leave), EMPTY, EMPTY,
   /* 0xcc */	EMPTY, IDEXW(I, int, 1), EMPTY, EX(iret),
@@ -275,7 +275,7 @@ static inline bool is_tb_boundary_opcode(void) {
     return true;
   }
 
-  if (opcode == 0xc3 || opcode == 0xcd || opcode == 0xcf ||
+  if (opcode == 0xc2 || opcode == 0xc3 || opcode == 0xcd || opcode == 0xcf ||
       opcode == 0xe8 || opcode == 0xe9 || opcode == 0xeb) {
     return true;
   }
