@@ -130,6 +130,16 @@ static void emit_mov_m32_rax_ecx(uint8_t **cursor) {
   emit_u8(cursor, 0x08);
 }
 
+static void emit_mov_edi_imm32(uint8_t **cursor, uint32_t value) {
+  emit_u8(cursor, 0xbf);
+  emit_u32(cursor, value);
+}
+
+static void emit_mov_esi_imm32(uint8_t **cursor, uint32_t value) {
+  emit_u8(cursor, 0xbe);
+  emit_u32(cursor, value);
+}
+
 static void emit_ret(uint8_t **cursor) {
   emit_u8(cursor, 0xc3);
 }
@@ -148,16 +158,50 @@ static void __attribute__((unused)) emit_call(uint8_t **cursor, void *target) {
   emit_u8(cursor, 0xec);
   emit_u8(cursor, 0x08);
 
-  uint8_t *next = *cursor + 5;
-  intptr_t rel = (uint8_t *)target - next;
-  Assert(rel >= INT32_MIN && rel <= INT32_MAX, "JIT call target is out of rel32 range");
-  emit_u8(cursor, 0xe8);
-  emit_u32(cursor, (uint32_t)(int32_t)rel);
+  /* code cache 可能离 helper 超过 rel32 范围，使用绝对间接调用更稳。 */
+  emit_mov_rax_imm64(cursor, (uint64_t)(uintptr_t)target);
+  emit_u8(cursor, 0xff);
+  emit_u8(cursor, 0xd0);
 
   emit_u8(cursor, 0x48);
   emit_u8(cursor, 0x83);
   emit_u8(cursor, 0xc4);
   emit_u8(cursor, 0x08);
+}
+
+enum {
+  JIT_ARITH_ADD = 0,
+  JIT_ARITH_SUB = 1,
+};
+
+static int jit_helper_arith_r2r(uint32_t info, uint32_t exit_eip) {
+  /* info: bit[2:0]=src，bit[5:3]=dest，bit[6]=add/sub。 */
+  uint8_t src = info & 0x7;
+  uint8_t dest = (info >> 3) & 0x7;
+  uint8_t op = (info >> 6) & 0x1;
+
+  uint32_t dest_val = cpu.gpr[dest]._32;
+  uint32_t src_val = cpu.gpr[src]._32;
+  uint32_t result = 0;
+
+  if (op == JIT_ARITH_ADD) {
+    result = dest_val + src_val;
+    /* add: 结果回绕表示无符号进位；同号输入得到异号结果表示溢出。 */
+    cpu.CF = result < dest_val;
+    cpu.OF = ((~(dest_val ^ src_val) & (dest_val ^ result)) >> 31) & 0x1;
+  }
+  else {
+    result = dest_val - src_val;
+    /* sub: 被减数小于减数表示借位；异号输入且结果变号表示溢出。 */
+    cpu.CF = dest_val < src_val;
+    cpu.OF = (((dest_val ^ src_val) & (dest_val ^ result)) >> 31) & 0x1;
+  }
+
+  cpu.gpr[dest]._32 = result;
+  cpu.ZF = result == 0;
+  cpu.SF = (result >> 31) & 0x1;
+  cpu.eip = exit_eip;
+  return JIT_EXEC_OK;
 }
 
 static bool tb_is_single_nop(TB *tb) {
@@ -215,6 +259,38 @@ static bool tb_is_single_mov_r2r(TB *tb, uint8_t *src, uint8_t *dest) {
   return true;
 }
 
+static bool tb_is_single_arith_r2r(TB *tb, uint8_t *op, uint8_t *src, uint8_t *dest) {
+  /* 仅支持 add/sub 的 32 位、两字节、ModR/M mod=3 寄存器编码。 */
+  if (tb->nr_instr != 1 || tb->guest_end != tb->guest_start + 2) {
+    return false;
+  }
+
+  uint8_t opcode = vaddr_read(tb->guest_start, 1);
+  if (opcode != 0x01 && opcode != 0x03 && opcode != 0x29 && opcode != 0x2b) {
+    return false;
+  }
+
+  uint8_t modrm = vaddr_read(tb->guest_start + 1, 1);
+  if ((modrm >> 6) != 3) {
+    return false;
+  }
+
+  uint8_t reg = (modrm >> 3) & 0x7;
+  uint8_t rm = modrm & 0x7;
+  /* 0x01/0x29 写 r/m；0x03/0x2b 写 reg。 */
+  if (opcode == 0x01 || opcode == 0x29) {
+    *src = reg;
+    *dest = rm;
+  }
+  else {
+    *src = rm;
+    *dest = reg;
+  }
+  *op = (opcode == 0x01 || opcode == 0x03) ? JIT_ARITH_ADD : JIT_ARITH_SUB;
+
+  return true;
+}
+
 static void jit_compile_tb(TB *tb) {
   if (tb == NULL || !tb->valid || !tb->sealed || tb->host_code != NULL) {
     return;
@@ -227,7 +303,11 @@ static void jit_compile_tb(TB *tb) {
   uint8_t src = 0;
   uint8_t dest = 0;
   bool is_mov_r2r = tb_is_single_mov_r2r(tb, &src, &dest);
-  if (!is_nop && !is_mov_i2r && !is_mov_r2r) {
+  uint8_t arith_op = 0;
+  uint8_t arith_src = 0;
+  uint8_t arith_dest = 0;
+  bool is_arith_r2r = tb_is_single_arith_r2r(tb, &arith_op, &arith_src, &arith_dest);
+  if (!is_nop && !is_mov_i2r && !is_mov_r2r && !is_arith_r2r) {
     return;
   }
 
@@ -245,6 +325,21 @@ static void jit_compile_tb(TB *tb) {
     emit_mov_ecx_m32_rax(&cursor);
     emit_mov_rax_imm64(&cursor, (uint64_t)(uintptr_t)&cpu.gpr[dest]._32);
     emit_mov_m32_rax_ecx(&cursor);
+  }
+  else if (is_arith_r2r) {
+    /* add/sub 需要维护 EFLAGS，先回到 C helper 保证语义一致。 */
+    uint32_t info = arith_src | (arith_dest << 3) | (arith_op << 6);
+    emit_mov_edi_imm32(&cursor, info);
+    emit_mov_esi_imm32(&cursor, tb->exit_eip);
+    emit_call(&cursor, jit_helper_arith_r2r);
+    emit_ret(&cursor);
+    jit_code_make_executable();
+
+    tb->host_code = code;
+    tb->host_size = cursor - code;
+    jit_state.stats.native_tbs ++;
+    jit_state.stats.native_instr += tb->nr_instr;
+    return;
   }
 
   /* 目前支持的 native 指令都不改变控制流，最后统一推进 eip。 */

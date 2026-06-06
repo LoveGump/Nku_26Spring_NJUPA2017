@@ -256,7 +256,9 @@ static inline bool is_tb_boundary_opcode(void) {
 
 #ifdef CONFIG_JIT
   /* 当前 native codegen 只处理单条候选指令，因此先把它们单独封成 TB。 */
-  if (opcode == 0x89 || opcode == 0x8b ||
+  if (opcode == 0x01 || opcode == 0x03 ||
+      opcode == 0x29 || opcode == 0x2b ||
+      opcode == 0x89 || opcode == 0x8b ||
       opcode == 0x90 || (opcode >= 0xb8 && opcode <= 0xbf)) {
     return true;
   }
