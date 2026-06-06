@@ -140,6 +140,11 @@ static void emit_mov_esi_imm32(uint8_t **cursor, uint32_t value) {
   emit_u32(cursor, value);
 }
 
+static void emit_mov_edx_imm32(uint8_t **cursor, uint32_t value) {
+  emit_u8(cursor, 0xba);
+  emit_u32(cursor, value);
+}
+
 static void emit_ret(uint8_t **cursor) {
   emit_u8(cursor, 0xc3);
 }
@@ -188,6 +193,11 @@ enum {
 enum {
   JIT_COMPARE_CMP = 0,
   JIT_COMPARE_TEST = 1,
+};
+
+enum {
+  JIT_MEM_MOFFS_READ = 0,
+  JIT_MEM_MOFFS_WRITE = 1,
 };
 
 static int jit_helper_arith_r2r(uint32_t info, uint32_t exit_eip) {
@@ -301,6 +311,19 @@ static int jit_helper_compare_r2r(uint32_t info, uint32_t exit_eip) {
   /* cmp/test 只更新标志位，不把临时结果写回客户寄存器。 */
   cpu.ZF = result == 0;
   cpu.SF = (result >> 31) & 0x1;
+  cpu.eip = exit_eip;
+  return JIT_EXEC_OK;
+}
+
+static int jit_helper_moffs32(uint32_t addr, uint32_t exit_eip, uint32_t op) {
+  /* moffs32 是指令里直接携带的线性地址；访存必须继续走 vaddr_*。 */
+  if (op == JIT_MEM_MOFFS_READ) {
+    cpu.eax = vaddr_read(addr, 4);
+  }
+  else {
+    vaddr_write(addr, 4, cpu.eax);
+  }
+
   cpu.eip = exit_eip;
   return JIT_EXEC_OK;
 }
@@ -483,6 +506,23 @@ static bool tb_is_single_compare_r2r(TB *tb, uint8_t *op, uint8_t *src, uint8_t 
   return true;
 }
 
+static bool tb_is_single_moffs32(TB *tb, uint8_t *op, uint32_t *addr) {
+  /* 0xa1: eax <- moffs32；0xa3: moffs32 <- eax，编码均为 opcode + imm32。 */
+  if (tb->nr_instr != 1 || tb->guest_end != tb->guest_start + 5) {
+    return false;
+  }
+
+  uint8_t opcode = vaddr_read(tb->guest_start, 1);
+  if (opcode != 0xa1 && opcode != 0xa3) {
+    return false;
+  }
+
+  *op = opcode == 0xa1 ? JIT_MEM_MOFFS_READ : JIT_MEM_MOFFS_WRITE;
+  /* 指令里的 moffs32 按小端存放，vaddr_read(..., 4) 还原直接地址。 */
+  *addr = vaddr_read(tb->guest_start + 1, 4);
+  return true;
+}
+
 static void jit_compile_tb(TB *tb) {
   if (tb == NULL || !tb->valid || !tb->sealed || tb->host_code != NULL) {
     return;
@@ -511,8 +551,12 @@ static void jit_compile_tb(TB *tb) {
   uint8_t compare_dest = 0;
   bool is_compare_r2r =
     tb_is_single_compare_r2r(tb, &compare_op, &compare_src, &compare_dest);
+  uint8_t moffs_op = 0;
+  uint32_t moffs_addr = 0;
+  bool is_moffs32 = tb_is_single_moffs32(tb, &moffs_op, &moffs_addr);
   if (!is_nop && !is_mov_i2r && !is_mov_r2r &&
-      !is_arith_r2r && !is_logic_r2r && !is_unary_reg && !is_compare_r2r) {
+      !is_arith_r2r && !is_logic_r2r && !is_unary_reg &&
+      !is_compare_r2r && !is_moffs32) {
     return;
   }
 
@@ -581,6 +625,21 @@ static void jit_compile_tb(TB *tb) {
     emit_mov_edi_imm32(&cursor, info);
     emit_mov_esi_imm32(&cursor, tb->exit_eip);
     emit_call(&cursor, jit_helper_compare_r2r);
+    emit_ret(&cursor);
+    jit_code_make_executable();
+
+    tb->host_code = code;
+    tb->host_size = cursor - code;
+    jit_state.stats.native_tbs ++;
+    jit_state.stats.native_instr += tb->nr_instr;
+    return;
+  }
+  else if (is_moffs32) {
+    /* 直接地址 mov 通过 vaddr_read/write helper 保留分页和 MMIO 语义。 */
+    emit_mov_edi_imm32(&cursor, moffs_addr);
+    emit_mov_esi_imm32(&cursor, tb->exit_eip);
+    emit_mov_edx_imm32(&cursor, moffs_op);
+    emit_call(&cursor, jit_helper_moffs32);
     emit_ret(&cursor);
     jit_code_make_executable();
 
