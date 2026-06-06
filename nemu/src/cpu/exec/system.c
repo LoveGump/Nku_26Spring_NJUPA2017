@@ -1,4 +1,5 @@
 #include "cpu/exec.h"
+#include "cpu/jit.h"
 #include "device/port-io.h"
 
 void diff_test_skip_qemu();
@@ -37,6 +38,8 @@ make_EHelper(mov_r2cr) {
     case 3: cpu.cr3.val = t0; break;
     default: panic("unsupported control register CR%d", id_dest->reg);
   }
+  /* cr0/cr3 会影响分页状态或页表基址，保守起见清空所有 JIT TB。 */
+  jit_invalidate_all();
 
   print_asm("movl %%%s,%%cr%d", reg_name(id_src->reg, 4), id_dest->reg);
 }

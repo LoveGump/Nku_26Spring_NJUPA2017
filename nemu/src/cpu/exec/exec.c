@@ -280,6 +280,11 @@ static inline bool is_tb_boundary_opcode(void) {
     return true;
   }
 
+  if (opcode == 0x122) {
+    /* 0f 22 /r 是 mov r32 -> crx；写 cr0/cr3 后会触发 JIT 全量失效。 */
+    return true;
+  }
+
   return opcode == 0xff && (decoding.ext_opcode == 2 || decoding.ext_opcode == 4);
 }
 

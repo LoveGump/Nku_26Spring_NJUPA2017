@@ -60,7 +60,12 @@ static uint64_t exec_native_tb(TB *tb, uint64_t n, bool print_flag) {
 static uint64_t exec_cached_tb(TB *tb, uint64_t n, bool print_flag) {
   assert(tb != NULL && tb->valid && tb->sealed);
 
-  uint64_t limit = tb->nr_instr < n ? tb->nr_instr : n;
+  /* 解释执行 TB 时也可能遇到 cr0/cr3 或内存写导致 TB 被清空，先做快照。 */
+  uint32_t nr_instr = tb->nr_instr;
+  vaddr_t guest_start = tb->guest_start;
+  vaddr_t guest_end = tb->guest_end;
+  vaddr_t exit_eip = tb->exit_eip;
+  uint64_t limit = nr_instr < n ? nr_instr : n;
   uint64_t executed = 0;
   bool aborted = false;
 
@@ -73,17 +78,17 @@ static uint64_t exec_cached_tb(TB *tb, uint64_t n, bool print_flag) {
       break;
     }
 
-    bool reached_end = cpu.eip == tb->exit_eip;
-    bool outside_tb = cpu.eip < tb->guest_start || cpu.eip > tb->guest_end;
+    bool reached_end = cpu.eip == exit_eip;
+    bool outside_tb = cpu.eip < guest_start || cpu.eip > guest_end;
 
-    if (executed + 1 < tb->nr_instr && (outside_tb || reached_end)) {
+    if (executed + 1 < nr_instr && (outside_tb || reached_end)) {
       aborted = true;
       executed ++;
       break;
     }
   }
 
-  if (executed == tb->nr_instr && cpu.eip != tb->exit_eip) {
+  if (executed == nr_instr && cpu.eip != exit_eip) {
     aborted = true;
   }
 
