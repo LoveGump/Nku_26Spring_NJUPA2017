@@ -44,6 +44,8 @@ static uint64_t exec_native_tb(TB *tb, uint64_t n, bool print_flag) {
     return 0;
   }
 
+  /* native helper 可能写内存并触发 TB 全量失效，先保存执行条数再调用。 */
+  uint32_t nr_instr = tb->nr_instr;
   int ret = jit_exec_native(tb);
   if (ret != JIT_EXEC_OK) {
     return 0;
@@ -52,7 +54,7 @@ static uint64_t exec_native_tb(TB *tb, uint64_t n, bool print_flag) {
   /* native TB 仍然按客户指令粒度保留 watchpoint 和设备更新语义。 */
   finish_one_instr();
   /* 控制流指令可能根据 EFLAGS 选择不同出口，eip 由 native code 自己写回。 */
-  return tb->nr_instr;
+  return nr_instr;
 }
 
 static uint64_t exec_cached_tb(TB *tb, uint64_t n, bool print_flag) {
