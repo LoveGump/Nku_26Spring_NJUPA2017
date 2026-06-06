@@ -200,6 +200,11 @@ enum {
   JIT_MEM_MOFFS_WRITE = 1,
 };
 
+enum {
+  JIT_MEM_RM_READ = 0,
+  JIT_MEM_RM_WRITE = 1,
+};
+
 static int jit_helper_arith_r2r(uint32_t info, uint32_t exit_eip) {
   /* info: bit[2:0]=src，bit[5:3]=dest，bit[6]=add/sub。 */
   uint8_t src = info & 0x7;
@@ -322,6 +327,30 @@ static int jit_helper_moffs32(uint32_t addr, uint32_t exit_eip, uint32_t op) {
   }
   else {
     vaddr_write(addr, 4, cpu.eax);
+  }
+
+  cpu.eip = exit_eip;
+  return JIT_EXEC_OK;
+}
+
+static int jit_helper_mov_rm32(uint32_t info, uint32_t disp, uint32_t exit_eip) {
+  /* info: bit[0]=read/write，bit[3:1]=reg，bit[6:4]=base，bit[7]=has_base。 */
+  uint8_t op = info & 0x1;
+  uint8_t reg = (info >> 1) & 0x7;
+  uint8_t base = (info >> 4) & 0x7;
+  uint8_t has_base = (info >> 7) & 0x1;
+  /* 有符号位移先扩展到 32 位，再叠加可选基址寄存器形成有效地址。 */
+  uint32_t addr = (uint32_t)(int32_t)disp;
+
+  if (has_base) {
+    addr += cpu.gpr[base]._32;
+  }
+
+  if (op == JIT_MEM_RM_READ) {
+    cpu.gpr[reg]._32 = vaddr_read(addr, 4);
+  }
+  else {
+    vaddr_write(addr, 4, cpu.gpr[reg]._32);
   }
 
   cpu.eip = exit_eip;
@@ -523,6 +552,56 @@ static bool tb_is_single_moffs32(TB *tb, uint8_t *op, uint32_t *addr) {
   return true;
 }
 
+static bool tb_is_single_mov_rm32(TB *tb, uint8_t *op, uint8_t *reg,
+    uint8_t *has_base, uint8_t *base, int32_t *disp) {
+  /* 当前只识别单条 32 位 mov r/m32 <-> r32，确保 TB 边界和指令长度一致。 */
+  if (tb->nr_instr != 1 || tb->guest_end < tb->guest_start + 2) {
+    return false;
+  }
+
+  uint8_t opcode = vaddr_read(tb->guest_start, 1);
+  if (opcode != 0x89 && opcode != 0x8b) {
+    return false;
+  }
+
+  uint8_t modrm = vaddr_read(tb->guest_start + 1, 1);
+  uint8_t mod = modrm >> 6;
+  uint8_t rm = modrm & 0x7;
+  if (mod == 3 || rm == R_ESP) {
+    /* mod=3 是寄存器形式；rm=esp 表示后接 SIB，留给下一步单独处理。 */
+    return false;
+  }
+
+  *reg = (modrm >> 3) & 0x7;
+  *base = rm;
+  *has_base = true;
+  *disp = 0;
+  uint32_t len = 2;
+
+  if (mod == 0 && rm == R_EBP) {
+    /* mod=00 rm=101 在 32 位地址编码中不是 ebp，而是 disp32 绝对地址。 */
+    *has_base = false;
+    *disp = vaddr_read(tb->guest_start + 2, 4);
+    len = 6;
+  }
+  else if (mod == 1) {
+    /* disp8 需要按有符号数扩展，例如 -4(%ebp)。 */
+    *disp = (int8_t)vaddr_read(tb->guest_start + 2, 1);
+    len = 3;
+  }
+  else if (mod == 2) {
+    *disp = vaddr_read(tb->guest_start + 2, 4);
+    len = 6;
+  }
+
+  if (tb->nr_instr != 1 || tb->guest_end != tb->guest_start + len) {
+    return false;
+  }
+
+  *op = opcode == 0x8b ? JIT_MEM_RM_READ : JIT_MEM_RM_WRITE;
+  return true;
+}
+
 static void jit_compile_tb(TB *tb) {
   if (tb == NULL || !tb->valid || !tb->sealed || tb->host_code != NULL) {
     return;
@@ -554,9 +633,16 @@ static void jit_compile_tb(TB *tb) {
   uint8_t moffs_op = 0;
   uint32_t moffs_addr = 0;
   bool is_moffs32 = tb_is_single_moffs32(tb, &moffs_op, &moffs_addr);
+  uint8_t mem_op = 0;
+  uint8_t mem_reg = 0;
+  uint8_t mem_has_base = 0;
+  uint8_t mem_base = 0;
+  int32_t mem_disp = 0;
+  bool is_mov_rm32 = tb_is_single_mov_rm32(tb, &mem_op, &mem_reg,
+      &mem_has_base, &mem_base, &mem_disp);
   if (!is_nop && !is_mov_i2r && !is_mov_r2r &&
       !is_arith_r2r && !is_logic_r2r && !is_unary_reg &&
-      !is_compare_r2r && !is_moffs32) {
+      !is_compare_r2r && !is_moffs32 && !is_mov_rm32) {
     return;
   }
 
@@ -640,6 +726,22 @@ static void jit_compile_tb(TB *tb) {
     emit_mov_esi_imm32(&cursor, tb->exit_eip);
     emit_mov_edx_imm32(&cursor, moffs_op);
     emit_call(&cursor, jit_helper_moffs32);
+    emit_ret(&cursor);
+    jit_code_make_executable();
+
+    tb->host_code = code;
+    tb->host_size = cursor - code;
+    jit_state.stats.native_tbs ++;
+    jit_state.stats.native_instr += tb->nr_instr;
+    return;
+  }
+  else if (is_mov_rm32) {
+    /* ModR/M 访存第一版只支持非 SIB 地址，真正访存仍走 vaddr_*。 */
+    uint32_t info = mem_op | (mem_reg << 1) | (mem_base << 4) | (mem_has_base << 7);
+    emit_mov_edi_imm32(&cursor, info);
+    emit_mov_esi_imm32(&cursor, mem_disp);
+    emit_mov_edx_imm32(&cursor, tb->exit_eip);
+    emit_call(&cursor, jit_helper_mov_rm32);
     emit_ret(&cursor);
     jit_code_make_executable();
 
