@@ -2,12 +2,23 @@
 
 #ifdef CONFIG_JIT
 
+#include <errno.h>
+#include <limits.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/mman.h>
+#include <unistd.h>
+
 typedef struct {
   bool enabled;
   TB tb_cache[JIT_TB_CACHE_SIZE];
   TB *active_tb;
   bool ignoring_sealed_tb;
   vaddr_t ignore_until;
+  uint8_t *code_cache;
+  size_t code_capacity;
+  size_t code_size;
+  bool code_writable;
   JITStats stats;
 } JITState;
 
@@ -15,6 +26,116 @@ static JITState jit_state;
 
 static inline uint32_t tb_index(vaddr_t eip) {
   return (eip >> 2) & (JIT_TB_CACHE_SIZE - 1);
+}
+
+static inline size_t align_up(size_t value, size_t align) {
+  return (value + align - 1) & ~(align - 1);
+}
+
+static void jit_code_protect(int prot, bool writable) {
+  if (jit_state.code_cache == NULL) {
+    return;
+  }
+
+  /* code cache 在写入和执行之间切换权限，避免长期保持 RWX。 */
+  int ret = mprotect(jit_state.code_cache, jit_state.code_capacity, prot);
+  Assert(ret == 0, "mprotect JIT code cache failed: %s", strerror(errno));
+  jit_state.code_writable = writable;
+}
+
+static void jit_code_make_writable(void) {
+  if (!jit_state.code_writable) {
+    jit_code_protect(PROT_READ | PROT_WRITE, true);
+  }
+}
+
+static void jit_code_make_executable(void) {
+  if (jit_state.code_writable) {
+    jit_code_protect(PROT_READ | PROT_EXEC, false);
+  }
+}
+
+static void jit_code_init(void) {
+  if (jit_state.code_cache != NULL) {
+    return;
+  }
+
+  /* 第一版先使用固定大小的线性 code cache，后续不够时整体清空重来。 */
+  jit_state.code_capacity = JIT_CODE_CACHE_SIZE;
+  jit_state.code_cache = mmap(NULL, jit_state.code_capacity,
+      PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  Assert(jit_state.code_cache != MAP_FAILED, "mmap JIT code cache failed: %s", strerror(errno));
+  jit_state.code_size = 0;
+  jit_state.code_writable = true;
+}
+
+static void jit_code_reset(void) {
+  jit_code_make_writable();
+  jit_state.code_size = 0;
+  jit_state.stats.code_bytes = 0;
+  jit_state.stats.code_flushes ++;
+}
+
+static uint8_t *jit_code_alloc(size_t size) {
+  size_t aligned_size = align_up(size, 16);
+  if (jit_state.code_size + aligned_size > jit_state.code_capacity) {
+    /* 简化淘汰策略：代码缓存满时丢弃所有 TB 和 host code。 */
+    jit_invalidate_all();
+    jit_code_reset();
+  }
+
+  Assert(jit_state.code_size + aligned_size <= jit_state.code_capacity,
+      "JIT code block is too large: %zu bytes", size);
+  jit_code_make_writable();
+
+  uint8_t *ptr = jit_state.code_cache + jit_state.code_size;
+  jit_state.code_size += aligned_size;
+  jit_state.stats.code_bytes = jit_state.code_size;
+  return ptr;
+}
+
+static inline void emit_u8(uint8_t **cursor, uint8_t value) {
+  *(*cursor)++ = value;
+}
+
+static inline void emit_u32(uint8_t **cursor, uint32_t value) {
+  memcpy(*cursor, &value, sizeof(value));
+  *cursor += sizeof(value);
+}
+
+static inline void __attribute__((unused)) emit_u64(uint8_t **cursor, uint64_t value) {
+  memcpy(*cursor, &value, sizeof(value));
+  *cursor += sizeof(value);
+}
+
+static void emit_ret(uint8_t **cursor) {
+  emit_u8(cursor, 0xc3);
+}
+
+static void emit_return_status(uint8_t **cursor, int status) {
+  /* x86-64: mov eax, imm32; ret。返回值按 SysV ABI 放在 eax。 */
+  emit_u8(cursor, 0xb8);
+  emit_u32(cursor, (uint32_t)status);
+  emit_ret(cursor);
+}
+
+static void __attribute__((unused)) emit_call(uint8_t **cursor, void *target) {
+  /* call 前调整栈，让被调 C helper 看到 16 字节对齐的栈。 */
+  emit_u8(cursor, 0x48);
+  emit_u8(cursor, 0x83);
+  emit_u8(cursor, 0xec);
+  emit_u8(cursor, 0x08);
+
+  uint8_t *next = *cursor + 5;
+  intptr_t rel = (uint8_t *)target - next;
+  Assert(rel >= INT32_MIN && rel <= INT32_MAX, "JIT call target is out of rel32 range");
+  emit_u8(cursor, 0xe8);
+  emit_u32(cursor, (uint32_t)(int32_t)rel);
+
+  emit_u8(cursor, 0x48);
+  emit_u8(cursor, 0x83);
+  emit_u8(cursor, 0xc4);
+  emit_u8(cursor, 0x08);
 }
 
 static void tb_seal(TB *tb) {
@@ -33,16 +154,20 @@ static void tb_seal(TB *tb) {
 }
 
 void jit_init(void) {
+  memset(&jit_state, 0, sizeof(jit_state));
   jit_state.enabled = true;
   jit_state.active_tb = NULL;
   jit_state.ignoring_sealed_tb = false;
   jit_state.ignore_until = 0;
-  memset(&jit_state.stats, 0, sizeof(jit_state.stats));
+  jit_code_init();
   jit_invalidate_all();
+  int ret = jit_code_self_test();
+  Assert(ret == JIT_EXEC_OK, "JIT code self-test failed: %d", ret);
 }
 
 void jit_reset(void) {
   jit_invalidate_all();
+  jit_code_reset();
 }
 
 void jit_invalidate_all(void) {
@@ -101,6 +226,29 @@ void tb_invalidate(TB *tb) {
 
 const JITStats *jit_get_stats(void) {
   return &jit_state.stats;
+}
+
+jit_func_t jit_emit_return(int status, uint32_t *host_size) {
+  uint8_t *code = jit_code_alloc(16);
+  uint8_t *cursor = code;
+  emit_return_status(&cursor, status);
+  /* 写完立刻切到 RX，当前阶段只验证最小 native code 可执行。 */
+  jit_code_make_executable();
+
+  if (host_size != NULL) {
+    *host_size = cursor - code;
+  }
+  return (jit_func_t)code;
+}
+
+int jit_code_self_test(void) {
+  uint32_t host_size = 0;
+  jit_func_t fn = jit_emit_return(JIT_EXEC_OK, &host_size);
+  Assert(fn != NULL && host_size == 6, "unexpected JIT self-test code size: %u", host_size);
+  /* 直接调用刚生成的 host code，确认 mmap/mprotect/codegen 三件事都可用。 */
+  int ret = fn();
+  jit_state.stats.code_self_tests ++;
+  return ret;
 }
 
 TB *jit_lookup_sealed(vaddr_t eip) {
