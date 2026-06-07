@@ -191,9 +191,25 @@ static void emit_mov_edx_m32_rax(uint8_t **cursor) {
   emit_u8(cursor, 0x10);
 }
 
+static void emit_add_ecx_m32_rax(uint8_t **cursor) {
+  emit_u8(cursor, 0x03);
+  emit_u8(cursor, 0x08);
+}
+
 static void emit_mov_m32_rax_ecx(uint8_t **cursor) {
   emit_u8(cursor, 0x89);
   emit_u8(cursor, 0x08);
+}
+
+static void emit_add_ecx_edx(uint8_t **cursor) {
+  emit_u8(cursor, 0x01);
+  emit_u8(cursor, 0xd1);
+}
+
+static void emit_shl_edx_imm8(uint8_t **cursor, uint8_t imm) {
+  emit_u8(cursor, 0xc1);
+  emit_u8(cursor, 0xe2);
+  emit_u8(cursor, imm);
 }
 
 static void emit_logic_ecx_edx(uint8_t **cursor, uint8_t op) {
@@ -552,14 +568,6 @@ static int jit_helper_mov_rm32(uint32_t info, uint32_t disp, uint32_t exit_eip) 
     vaddr_write(addr, 4, cpu.gpr[reg]._32);
   }
 
-  cpu.eip = exit_eip;
-  return JIT_EXEC_OK;
-}
-
-static int jit_helper_lea_m2g(uint32_t info, uint32_t disp, uint32_t exit_eip) {
-  /* lea 只计算有效地址并写入目标寄存器，不读取内存，也不修改 EFLAGS。 */
-  uint8_t reg = (info >> 1) & 0x7;
-  cpu.gpr[reg]._32 = jit_calc_rm_addr(info, disp);
   cpu.eip = exit_eip;
   return JIT_EXEC_OK;
 }
@@ -1268,7 +1276,7 @@ static void jit_compile_tb(TB *tb) {
     return;
   }
 
-  size_t native_size = is_logic_r2r ? 128 : 64;
+  size_t native_size = (is_logic_r2r || is_lea_m2g) ? 128 : 64;
   if (!jit_code_prepare(native_size)) {
     return;
   }
@@ -1421,21 +1429,25 @@ static void jit_compile_tb(TB *tb) {
     return;
   }
   else if (is_lea_m2g) {
-    uint32_t info = JIT_MEM_RM_READ | (lea_reg << 1) | (lea_base << 4) |
-      (lea_has_base << 7) | (lea_index << 8) | (lea_has_index << 11) |
-      (lea_scale << 12);
-    emit_mov_edi_imm32(&cursor, info);
-    emit_mov_esi_imm32(&cursor, lea_disp);
-    emit_mov_edx_imm32(&cursor, tb->exit_eip);
-    emit_call(&cursor, jit_helper_lea_m2g);
-    emit_ret(&cursor);
-    jit_code_make_executable();
-
-    tb->host_code = jit_code_exec_ptr(code);
-    tb->host_size = cursor - code;
-    jit_state.stats.native_tbs ++;
-    jit_state.stats.native_instr += tb->nr_instr;
-    return;
+    /*
+     * lea 只做地址算术，不读内存也不修改 EFLAGS。
+     * 直接生成 disp + base + (index << scale)，避免一次 C helper 调用。
+     */
+    emit_mov_ecx_imm32(&cursor, lea_disp);
+    if (lea_has_base) {
+      emit_mov_rax_imm64(&cursor, (uint64_t)(uintptr_t)&cpu.gpr[lea_base]._32);
+      emit_add_ecx_m32_rax(&cursor);
+    }
+    if (lea_has_index) {
+      emit_mov_rax_imm64(&cursor, (uint64_t)(uintptr_t)&cpu.gpr[lea_index]._32);
+      emit_mov_edx_m32_rax(&cursor);
+      if (lea_scale != 0) {
+        emit_shl_edx_imm8(&cursor, lea_scale);
+      }
+      emit_add_ecx_edx(&cursor);
+    }
+    emit_mov_rax_imm64(&cursor, (uint64_t)(uintptr_t)&cpu.gpr[lea_reg]._32);
+    emit_mov_m32_rax_ecx(&cursor);
   }
   else if (is_direct_jmp) {
     /* 直接跳转的目标来自解释器 trace，避免在 JIT 中重复实现符号位移计算。 */
