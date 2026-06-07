@@ -27,18 +27,26 @@ static inline uint32_t page_entry_read(paddr_t addr) {
 
 // 模拟内存的读写接口：物理地址读写和虚拟地址读写
 uint32_t paddr_read(paddr_t addr, int len) {
-  // 首先判断是否访问的是MMIO地址，如果是则调用mmio_read函数进行读操作，否则直接从模拟内存中读取数据
-  int map_NO = is_mmio(addr);
-  if (map_NO != -1) {
-    return mmio_read(addr, len, map_NO);
+  /*
+   * 大多数物理访存落在普通内存。先用 MMIO 整体边界在本函数内快速排除，
+   * 避免每次普通读都进入 is_mmio() 函数。
+   */
+  if (mmio_may_hit(addr)) {
+    int map_NO = is_mmio(addr);
+    if (map_NO != -1) {
+      return mmio_read(addr, len, map_NO);
+    }
   }
   return pmem_rw(addr, uint32_t) & (~0u >> ((4 - len) << 3));
 }
 void paddr_write(paddr_t addr, int len, uint32_t data) {
-  int map_NO = is_mmio(addr);
-  if (map_NO != -1) {
-    mmio_write(addr, len, data, map_NO);
-    return;
+  /* 写路径同样先做边界快拒绝，保留命中 MMIO 时的原有回调语义。 */
+  if (mmio_may_hit(addr)) {
+    int map_NO = is_mmio(addr);
+    if (map_NO != -1) {
+      mmio_write(addr, len, data, map_NO);
+      return;
+    }
   }
   memcpy(guest_to_host(addr), &data, len);
 }

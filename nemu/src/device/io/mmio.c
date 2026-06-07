@@ -16,8 +16,8 @@ typedef struct {
 
 static MMIO_t maps[NR_MAP];
 static int nr_map = 0;
-static paddr_t mmio_low_bound = (paddr_t)-1;
-static paddr_t mmio_high_bound = 0;
+paddr_t mmio_low_bound = (paddr_t)-1;
+paddr_t mmio_high_bound = 0;
 
 /* device interface */
 void* add_mmio_map(paddr_t addr, int len, mmio_callback_t callback) {
