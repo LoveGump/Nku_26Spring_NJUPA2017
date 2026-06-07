@@ -16,6 +16,8 @@ typedef struct {
 
 static MMIO_t maps[NR_MAP];
 static int nr_map = 0;
+static paddr_t mmio_low_bound = (paddr_t)-1;
+static paddr_t mmio_high_bound = 0;
 
 /* device interface */
 void* add_mmio_map(paddr_t addr, int len, mmio_callback_t callback) {
@@ -27,6 +29,15 @@ void* add_mmio_map(paddr_t addr, int len, mmio_callback_t callback) {
   maps[nr_map].high = addr + len - 1;
   maps[nr_map].mmio_space = space_base;
   maps[nr_map].callback = callback;
+
+  /* 维护全局 MMIO 边界，普通内存访问可在 is_mmio() 中快速排除。 */
+  if (addr < mmio_low_bound) {
+    mmio_low_bound = addr;
+  }
+  if (maps[nr_map].high > mmio_high_bound) {
+    mmio_high_bound = maps[nr_map].high;
+  }
+
   nr_map ++;
   mmio_space_free_index += len;
   return space_base;
@@ -34,6 +45,11 @@ void* add_mmio_map(paddr_t addr, int len, mmio_callback_t callback) {
 
 /* bus interface */
 int is_mmio(paddr_t addr) {
+  /* 绝大多数访存落在普通内存，先用整体边界避免线性扫描 map 表。 */
+  if (nr_map == 0 || addr < mmio_low_bound || addr > mmio_high_bound) {
+    return -1;
+  }
+
   int i;
   for (i = 0; i < nr_map; i ++) {
     if (addr >= maps[i].low && addr <= maps[i].high) {
