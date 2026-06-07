@@ -14,6 +14,17 @@ uint8_t pmem[PMEM_SIZE];
 
 /* Memory accessing interfaces */
 
+static inline uint32_t page_entry_read(paddr_t addr) {
+  /*
+   * 页目录/页表是 CPU 使用的普通内存结构，不应放在 MMIO 区域。
+   * page walk 是虚拟访存的热路径，这里直接读 pmem，避免每次读取 PDE/PTE
+   * 都进入 paddr_read() 并重复执行 MMIO 判断。
+   */
+  Assert(addr <= PMEM_SIZE - sizeof(uint32_t),
+      "page table physical address(0x%08x) is out of bound", addr);
+  return *(uint32_t *)guest_to_host(addr);
+}
+
 // 模拟内存的读写接口：物理地址读写和虚拟地址读写
 uint32_t paddr_read(paddr_t addr, int len) {
   // 首先判断是否访问的是MMIO地址，如果是则调用mmio_read函数进行读操作，否则直接从模拟内存中读取数据
@@ -41,13 +52,13 @@ static paddr_t page_translate(vaddr_t addr) {
   // 获得页目录
   paddr_t pdir_base = cpu.cr3.page_directory_base << 12;
   PDE pde;  // 读取页目录项
-  pde.val = paddr_read(pdir_base + dir * sizeof(PDE), 4);
+  pde.val = page_entry_read(pdir_base + dir * sizeof(PDE));
   assert(pde.present);
 
   // 获得页表
   paddr_t ptab_base = pde.page_frame << 12;
   PTE pte;
-  pte.val = paddr_read(ptab_base + page * sizeof(PTE), 4);
+  pte.val = page_entry_read(ptab_base + page * sizeof(PTE));
   assert(pte.present);
 
   return (pte.page_frame << 12) | offset;
