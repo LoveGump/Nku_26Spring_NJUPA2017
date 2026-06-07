@@ -5,11 +5,20 @@
 
 #ifdef CONFIG_JIT
 
-#define JIT_TB_CACHE_SIZE 4096
+#define JIT_TB_CACHE_BITS 12
+#define JIT_TB_CACHE_SIZE (1u << JIT_TB_CACHE_BITS)
 #define JIT_MAX_TB_INSTR 16
 #define JIT_CODE_CACHE_SIZE (1024 * 1024)
 /* TB 至少被缓存命中三次后才值得生成 native code。 */
 #define JIT_COMPILE_HIT_THRESHOLD 3
+
+static inline uint32_t jit_tb_index(vaddr_t eip) {
+  /*
+   * x86 指令并不按 4 字节对齐，不能丢弃 eip 低两位。
+   * 乘法散列使用完整地址，减少相邻变长指令和不同代码页之间的槽位冲突。
+   */
+  return (uint32_t)(eip * 2654435761u) >> (32 - JIT_TB_CACHE_BITS);
+}
 
 typedef int (*jit_func_t)(void);
 
@@ -100,7 +109,7 @@ static inline TB *jit_lookup_sealed(vaddr_t eip) {
   jit_lookup_count ++;
 
   /* direct-mapped TB 命中检查是 cpu_exec() 的高频路径，保持在 header 内联。 */
-  TB *tb = &jit_tb_cache[(eip >> 2) & (JIT_TB_CACHE_SIZE - 1)];
+  TB *tb = &jit_tb_cache[jit_tb_index(eip)];
   if (!tb->valid || tb->guest_start != eip) {
     jit_miss_count ++;
     return NULL;

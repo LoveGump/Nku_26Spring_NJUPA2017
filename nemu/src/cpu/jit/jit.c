@@ -38,10 +38,6 @@ uint64_t jit_lookup_count;
 uint64_t jit_hit_count;
 uint64_t jit_miss_count;
 
-static inline uint32_t tb_index(vaddr_t eip) {
-  return (eip >> 2) & (JIT_TB_CACHE_SIZE - 1);
-}
-
 static inline size_t align_up(size_t value, size_t align) {
   return (value + align - 1) & ~(align - 1);
 }
@@ -1590,7 +1586,7 @@ void jit_invalidate_range(vaddr_t addr, uint32_t len) {
 TB *tb_lookup(vaddr_t eip) {
   jit_lookup_count ++;
 
-  TB *tb = &jit_tb_cache[tb_index(eip)];
+  TB *tb = &jit_tb_cache[jit_tb_index(eip)];
   if (tb->valid && tb->guest_start == eip) {
     tb->hit_count ++;
     jit_hit_count ++;
@@ -1602,7 +1598,7 @@ TB *tb_lookup(vaddr_t eip) {
 }
 
 TB *tb_alloc(vaddr_t eip) {
-  TB *tb = &jit_tb_cache[tb_index(eip)];
+  TB *tb = &jit_tb_cache[jit_tb_index(eip)];
   tb_invalidate(tb);
 
   tb->valid = true;
