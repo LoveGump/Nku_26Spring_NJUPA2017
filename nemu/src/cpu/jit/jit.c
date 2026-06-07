@@ -30,6 +30,8 @@ typedef struct {
 } JITState;
 
 static JITState jit_state;
+bool jit_cached_exec_active;
+uint64_t jit_direct_instr_count;
 
 static inline uint32_t tb_index(vaddr_t eip) {
   return (eip >> 2) & (JIT_TB_CACHE_SIZE - 1);
@@ -1487,6 +1489,8 @@ static void tb_seal(TB *tb) {
 
 void jit_init(void) {
   memset(&jit_state, 0, sizeof(jit_state));
+  jit_cached_exec_active = false;
+  jit_direct_instr_count = 0;
   jit_state.enabled = true;
   jit_state.active_tb = NULL;
   jit_state.ignoring_sealed_tb = false;
@@ -1498,11 +1502,13 @@ void jit_init(void) {
 }
 
 void jit_reset(void) {
+  jit_cached_exec_active = false;
   jit_invalidate_all();
   jit_code_reset();
 }
 
 void jit_invalidate_all(void) {
+  jit_cached_exec_active = false;
   jit_state.active_tb = NULL;
   jit_state.ignoring_sealed_tb = false;
   jit_state.ignore_until = 0;
@@ -1597,6 +1603,8 @@ void tb_invalidate(TB *tb) {
 }
 
 const JITStats *jit_get_stats(void) {
+  /* 高频 direct 计数在 header 中内联累加，查询时再同步到统计快照。 */
+  jit_state.stats.direct_instr = jit_direct_instr_count;
   return &jit_state.stats;
 }
 
@@ -1644,23 +1652,16 @@ TB *jit_lookup_sealed(vaddr_t eip) {
     if (tb->host_code == NULL) {
       jit_state.stats.compile_unsupported ++;
       jit_state.stats.unsupported_opcode[vaddr_read(tb->guest_start, 1)] ++;
+      uint32_t nr_instr = tb->nr_instr <= JIT_MAX_TB_INSTR ? tb->nr_instr : JIT_MAX_TB_INSTR;
+      jit_state.stats.unsupported_instr_count[nr_instr] ++;
     }
   }
 
   return tb;
 }
 
-bool jit_tb_has_native(TB *tb) {
-  return tb != NULL && tb->valid && tb->sealed && tb->host_code != NULL;
-}
-
 int jit_exec_native(TB *tb) {
-  if (!jit_tb_has_native(tb)) {
-    jit_state.stats.native_fallbacks ++;
-    return JIT_EXEC_FALLBACK;
-  }
-
-  /* helper 可能在执行期间失效当前 TB，因此调用前先保存动态指令数。 */
+  /* 调用方已验证 host_code；helper 可能失效当前 TB，因此先保存动态指令数。 */
   uint32_t nr_instr = tb->nr_instr;
   jit_func_t fn = (jit_func_t)tb->host_code;
   jit_state.stats.native_calls ++;
@@ -1668,11 +1669,10 @@ int jit_exec_native(TB *tb) {
   if (ret == JIT_EXEC_OK) {
     jit_state.stats.native_executed_instr += nr_instr;
   }
+  else if (ret == JIT_EXEC_FALLBACK) {
+    jit_state.stats.native_fallbacks ++;
+  }
   return ret;
-}
-
-void jit_record_direct_exec(void) {
-  jit_state.stats.direct_instr ++;
 }
 
 void jit_begin_tb_exec(TB *tb) {
@@ -1682,10 +1682,12 @@ void jit_begin_tb_exec(TB *tb) {
 
   jit_state.ignoring_sealed_tb = true;
   jit_state.ignore_until = tb->guest_end;
+  jit_cached_exec_active = true;
   jit_state.stats.executed_tbs ++;
 }
 
 void jit_end_tb_exec(uint32_t nr_instr, bool aborted) {
+  jit_cached_exec_active = false;
   jit_state.ignoring_sealed_tb = false;
   jit_state.ignore_until = 0;
   jit_state.stats.executed_instr += nr_instr;

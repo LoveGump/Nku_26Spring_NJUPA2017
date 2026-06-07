@@ -36,6 +36,10 @@ typedef struct TranslationBlock {
   uint32_t host_size;
 } TB;
 
+static inline bool jit_tb_has_native(const TB *tb) {
+  return tb != NULL && tb->valid && tb->sealed && tb->host_code != NULL;
+}
+
 typedef struct {
   uint64_t lookups;
   uint64_t hits;
@@ -55,6 +59,7 @@ typedef struct {
   uint64_t compile_attempts;
   uint64_t compile_unsupported;
   uint64_t unsupported_opcode[256];
+  uint64_t unsupported_instr_count[JIT_MAX_TB_INSTR + 1];
   uint64_t native_tbs;
   uint64_t native_instr;
   uint64_t native_calls;
@@ -62,6 +67,9 @@ typedef struct {
   uint64_t native_fallbacks;
   uint32_t max_tb_instr;
 } JITStats;
+
+extern bool jit_cached_exec_active;
+extern uint64_t jit_direct_instr_count;
 
 void jit_init(void);
 void jit_reset(void);
@@ -72,13 +80,20 @@ TB *tb_alloc(vaddr_t eip);
 void tb_invalidate(TB *tb);
 const JITStats *jit_get_stats(void);
 void jit_record_instr(vaddr_t start, vaddr_t end, vaddr_t next_eip, bool end_of_tb);
-void jit_record_direct_exec(void);
+static inline void jit_maybe_record_instr(
+    vaddr_t start, vaddr_t end, vaddr_t next_eip, bool end_of_tb) {
+  if (!jit_cached_exec_active) {
+    jit_record_instr(start, end, next_eip, end_of_tb);
+  }
+}
+static inline void jit_record_direct_exec(void) {
+  jit_direct_instr_count ++;
+}
 TB *jit_lookup_sealed(vaddr_t eip);
 void jit_begin_tb_exec(TB *tb);
 void jit_end_tb_exec(uint32_t nr_instr, bool aborted);
 jit_func_t jit_emit_return(int status, uint32_t *host_size);
 int jit_code_self_test(void);
-bool jit_tb_has_native(TB *tb);
 int jit_exec_native(TB *tb);
 
 #else
@@ -88,6 +103,8 @@ static inline void jit_reset(void) {}
 static inline void jit_invalidate_all(void) {}
 static inline void jit_invalidate_range(vaddr_t addr, uint32_t len) {}
 static inline void jit_record_instr(vaddr_t start, vaddr_t end, vaddr_t next_eip, bool end_of_tb) {}
+static inline void jit_maybe_record_instr(
+    vaddr_t start, vaddr_t end, vaddr_t next_eip, bool end_of_tb) {}
 static inline void jit_record_direct_exec(void) {}
 
 #endif

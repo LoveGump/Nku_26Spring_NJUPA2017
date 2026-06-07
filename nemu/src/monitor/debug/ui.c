@@ -102,6 +102,21 @@ static void display_jit_stats(void) {
   if (printed_header) {
     printf("\n");
   }
+
+  printed_header = false;
+  for (int nr_instr = 1; nr_instr <= JIT_MAX_TB_INSTR; nr_instr ++) {
+    if (stats->unsupported_instr_count[nr_instr] == 0) {
+      continue;
+    }
+    if (!printed_header) {
+      printf("Unsupported TB length:");
+      printed_header = true;
+    }
+    printf(" %d=%" PRIu64, nr_instr, stats->unsupported_instr_count[nr_instr]);
+  }
+  if (printed_header) {
+    printf("\n");
+  }
 #else
   printf("JIT is disabled in this build.\n");
 #endif

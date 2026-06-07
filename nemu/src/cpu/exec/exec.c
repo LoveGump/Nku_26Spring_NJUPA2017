@@ -318,7 +318,7 @@ void exec_wrapper(bool print_flag) {
   // 更新 eip 的值
   update_eip();
 
-  jit_record_instr(instr_start, instr_end, cpu.eip, end_of_tb);
+  jit_maybe_record_instr(instr_start, instr_end, cpu.eip, end_of_tb);
 
   if (cpu.INTR && cpu.IF) {
     cpu.INTR = false;
