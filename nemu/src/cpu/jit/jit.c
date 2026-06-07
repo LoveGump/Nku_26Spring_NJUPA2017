@@ -13,6 +13,7 @@
 
 #define JIT_GUEST_PAGE_SHIFT 12
 #define JIT_GUEST_PAGE_COUNT (1u << (32 - JIT_GUEST_PAGE_SHIFT))
+#define JIT_EFLAGS_LOGIC_MASK ((1u << 0) | (1u << 6) | (1u << 7) | (1u << 11))
 
 typedef struct {
   bool enabled;
@@ -189,9 +190,53 @@ static void emit_mov_ecx_m32_rax(uint8_t **cursor) {
   emit_u8(cursor, 0x08);
 }
 
+static void emit_mov_edx_m32_rax(uint8_t **cursor) {
+  emit_u8(cursor, 0x8b);
+  emit_u8(cursor, 0x10);
+}
+
 static void emit_mov_m32_rax_ecx(uint8_t **cursor) {
   emit_u8(cursor, 0x89);
   emit_u8(cursor, 0x08);
+}
+
+static void emit_logic_ecx_edx(uint8_t **cursor, uint8_t op) {
+  /*
+   * 生成 ecx <- ecx op edx。x86 host 的 32 位 OR/AND/XOR 会按同样规则
+   * 设置 ZF/SF 并清零 CF/OF，因此可以直接捕获这些 flags 写回 guest。
+   */
+  if (op == 0) {
+    emit_u8(cursor, 0x09);
+  }
+  else if (op == 1) {
+    emit_u8(cursor, 0x21);
+  }
+  else {
+    emit_u8(cursor, 0x31);
+  }
+  emit_u8(cursor, 0xd1);
+}
+
+static void emit_pushfq_pop_rdx(uint8_t **cursor) {
+  emit_u8(cursor, 0x9c);
+  emit_u8(cursor, 0x5a);
+}
+
+static void emit_and_edx_imm32(uint8_t **cursor, uint32_t value) {
+  emit_u8(cursor, 0x81);
+  emit_u8(cursor, 0xe2);
+  emit_u32(cursor, value);
+}
+
+static void emit_and_ecx_imm32(uint8_t **cursor, uint32_t value) {
+  emit_u8(cursor, 0x81);
+  emit_u8(cursor, 0xe1);
+  emit_u32(cursor, value);
+}
+
+static void emit_or_ecx_edx(uint8_t **cursor) {
+  emit_u8(cursor, 0x09);
+  emit_u8(cursor, 0xd1);
 }
 
 static void emit_mov_edi_imm32(uint8_t **cursor, uint32_t value) {
@@ -315,36 +360,6 @@ static int jit_helper_arith_r2r(uint32_t info, uint32_t exit_eip) {
   }
 
   cpu.gpr[dest]._32 = result;
-  cpu.ZF = result == 0;
-  cpu.SF = (result >> 31) & 0x1;
-  cpu.eip = exit_eip;
-  return JIT_EXEC_OK;
-}
-
-static int jit_helper_logic_r2r(uint32_t info, uint32_t exit_eip) {
-  /* info: bit[2:0]=src，bit[5:3]=dest，bit[7:6]=or/and/xor。 */
-  uint8_t src = info & 0x7;
-  uint8_t dest = (info >> 3) & 0x7;
-  uint8_t op = (info >> 6) & 0x3;
-
-  uint32_t dest_val = cpu.gpr[dest]._32;
-  uint32_t src_val = cpu.gpr[src]._32;
-  uint32_t result = 0;
-
-  if (op == JIT_LOGIC_OR) {
-    result = dest_val | src_val;
-  }
-  else if (op == JIT_LOGIC_AND) {
-    result = dest_val & src_val;
-  }
-  else {
-    result = dest_val ^ src_val;
-  }
-
-  cpu.gpr[dest]._32 = result;
-  /* x86 逻辑运算按结果更新 ZF/SF，并把 CF/OF 清零。 */
-  cpu.CF = 0;
-  cpu.OF = 0;
   cpu.ZF = result == 0;
   cpu.SF = (result >> 31) & 0x1;
   cpu.eip = exit_eip;
@@ -1257,11 +1272,12 @@ static void jit_compile_tb(TB *tb) {
     return;
   }
 
-  if (!jit_code_prepare(64)) {
+  size_t native_size = is_logic_r2r ? 128 : 64;
+  if (!jit_code_prepare(native_size)) {
     return;
   }
 
-  uint8_t *code = jit_code_alloc(64);
+  uint8_t *code = jit_code_alloc(native_size);
   uint8_t *cursor = code;
 
   if (is_mov_i2r) {
@@ -1292,19 +1308,25 @@ static void jit_compile_tb(TB *tb) {
     return;
   }
   else if (is_logic_r2r) {
-    /* 逻辑运算通过 helper 写结果、更新 ZF/SF，并清零 CF/OF。 */
-    uint32_t info = logic_src | (logic_dest << 3) | (logic_op << 6);
-    emit_mov_edi_imm32(&cursor, info);
-    emit_mov_esi_imm32(&cursor, tb->exit_eip);
-    emit_call(&cursor, jit_helper_logic_r2r);
-    emit_ret(&cursor);
-    jit_code_make_executable();
-
-    tb->host_code = jit_code_exec_ptr(code);
-    tb->host_size = cursor - code;
-    jit_state.stats.native_tbs ++;
-    jit_state.stats.native_instr += tb->nr_instr;
-    return;
+    /*
+     * 逻辑寄存器指令的语义很适合直接生成 host code:
+     * 32 位 OR/AND/XOR 本身会按 x86 规则更新 ZF/SF，并清零 CF/OF。
+     * 这里用 pushfq 抓取 host flags，再只合并 guest 关心的四个标志位。
+     */
+    emit_mov_rax_imm64(&cursor, (uint64_t)(uintptr_t)&cpu.gpr[logic_dest]._32);
+    emit_mov_ecx_m32_rax(&cursor);
+    emit_mov_rax_imm64(&cursor, (uint64_t)(uintptr_t)&cpu.gpr[logic_src]._32);
+    emit_mov_edx_m32_rax(&cursor);
+    emit_logic_ecx_edx(&cursor, logic_op);
+    emit_pushfq_pop_rdx(&cursor);
+    emit_mov_rax_imm64(&cursor, (uint64_t)(uintptr_t)&cpu.gpr[logic_dest]._32);
+    emit_mov_m32_rax_ecx(&cursor);
+    emit_and_edx_imm32(&cursor, JIT_EFLAGS_LOGIC_MASK);
+    emit_mov_rax_imm64(&cursor, (uint64_t)(uintptr_t)&cpu.eflags);
+    emit_mov_ecx_m32_rax(&cursor);
+    emit_and_ecx_imm32(&cursor, ~JIT_EFLAGS_LOGIC_MASK);
+    emit_or_ecx_edx(&cursor);
+    emit_mov_m32_rax_ecx(&cursor);
   }
   else if (is_unary_reg) {
     uint32_t info = unary_reg | (unary_op << 3);
