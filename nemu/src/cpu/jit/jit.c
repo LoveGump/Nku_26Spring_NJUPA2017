@@ -16,7 +16,6 @@
 
 typedef struct {
   bool enabled;
-  TB tb_cache[JIT_TB_CACHE_SIZE];
   TB *active_tb;
   bool ignoring_sealed_tb;
   vaddr_t ignore_until;
@@ -30,8 +29,13 @@ typedef struct {
 } JITState;
 
 static JITState jit_state;
+/* 供 jit.h 中的内联快路径直接访问，减少 cpu_exec 主循环里的函数调用。 */
 bool jit_cached_exec_active;
 uint64_t jit_direct_instr_count;
+TB jit_tb_cache[JIT_TB_CACHE_SIZE];
+uint64_t jit_lookup_count;
+uint64_t jit_hit_count;
+uint64_t jit_miss_count;
 
 static inline uint32_t tb_index(vaddr_t eip) {
   return (eip >> 2) & (JIT_TB_CACHE_SIZE - 1);
@@ -1489,8 +1493,12 @@ static void tb_seal(TB *tb) {
 
 void jit_init(void) {
   memset(&jit_state, 0, sizeof(jit_state));
+  memset(jit_tb_cache, 0, sizeof(jit_tb_cache));
   jit_cached_exec_active = false;
   jit_direct_instr_count = 0;
+  jit_lookup_count = 0;
+  jit_hit_count = 0;
+  jit_miss_count = 0;
   jit_state.enabled = true;
   jit_state.active_tb = NULL;
   jit_state.ignoring_sealed_tb = false;
@@ -1514,7 +1522,7 @@ void jit_invalidate_all(void) {
   jit_state.ignore_until = 0;
 
   for (int i = 0; i < JIT_TB_CACHE_SIZE; i ++) {
-    tb_invalidate(&jit_state.tb_cache[i]);
+    tb_invalidate(&jit_tb_cache[i]);
   }
   memset(jit_state.code_page_refs, 0, sizeof(jit_state.code_page_refs));
   jit_state.stats.invalidations ++;
@@ -1536,7 +1544,7 @@ void jit_invalidate_range(vaddr_t addr, uint32_t len) {
   vaddr_t end = addr + len;
   bool invalidated = false;
   for (int i = 0; i < JIT_TB_CACHE_SIZE; i ++) {
-    TB *tb = &jit_state.tb_cache[i];
+    TB *tb = &jit_tb_cache[i];
     if (!tb->valid) {
       continue;
     }
@@ -1558,21 +1566,21 @@ void jit_invalidate_range(vaddr_t addr, uint32_t len) {
 }
 
 TB *tb_lookup(vaddr_t eip) {
-  jit_state.stats.lookups ++;
+  jit_lookup_count ++;
 
-  TB *tb = &jit_state.tb_cache[tb_index(eip)];
+  TB *tb = &jit_tb_cache[tb_index(eip)];
   if (tb->valid && tb->guest_start == eip) {
     tb->hit_count ++;
-    jit_state.stats.hits ++;
+    jit_hit_count ++;
     return tb;
   }
 
-  jit_state.stats.misses ++;
+  jit_miss_count ++;
   return NULL;
 }
 
 TB *tb_alloc(vaddr_t eip) {
-  TB *tb = &jit_state.tb_cache[tb_index(eip)];
+  TB *tb = &jit_tb_cache[tb_index(eip)];
   tb_invalidate(tb);
 
   tb->valid = true;
@@ -1603,8 +1611,11 @@ void tb_invalidate(TB *tb) {
 }
 
 const JITStats *jit_get_stats(void) {
-  /* 高频 direct 计数在 header 中内联累加，查询时再同步到统计快照。 */
+  /* 高频计数在 header 中内联累加，查询时再同步到统计快照。 */
   jit_state.stats.direct_instr = jit_direct_instr_count;
+  jit_state.stats.lookups = jit_lookup_count;
+  jit_state.stats.hits = jit_hit_count;
+  jit_state.stats.misses = jit_miss_count;
   return &jit_state.stats;
 }
 
@@ -1631,12 +1642,7 @@ int jit_code_self_test(void) {
   return ret;
 }
 
-TB *jit_lookup_sealed(vaddr_t eip) {
-  TB *tb = tb_lookup(eip);
-  if (tb == NULL || !tb->sealed) {
-    return NULL;
-  }
-
+TB *jit_prepare_hot_tb(TB *tb, vaddr_t eip) {
   /*
    * 只为真正重复执行的热点 TB 生成 native code，避免一次性代码消耗
    * 编译时间和 code cache；不支持翻译的 TB 也只尝试编译一次。

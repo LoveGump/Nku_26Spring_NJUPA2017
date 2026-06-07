@@ -68,8 +68,14 @@ typedef struct {
   uint32_t max_tb_instr;
 } JITStats;
 
+/* 下面这些状态暴露给 header 内联热路径，避免每条指令跨函数更新统计。 */
 extern bool jit_cached_exec_active;
 extern uint64_t jit_direct_instr_count;
+/* TB cache 和 lookup 计数同样走内联快路径，冷路径仍在 jit.c 中处理。 */
+extern TB jit_tb_cache[JIT_TB_CACHE_SIZE];
+extern uint64_t jit_lookup_count;
+extern uint64_t jit_hit_count;
+extern uint64_t jit_miss_count;
 
 void jit_init(void);
 void jit_reset(void);
@@ -89,7 +95,29 @@ static inline void jit_maybe_record_instr(
 static inline void jit_record_direct_exec(void) {
   jit_direct_instr_count ++;
 }
-TB *jit_lookup_sealed(vaddr_t eip);
+TB *jit_prepare_hot_tb(TB *tb, vaddr_t eip);
+static inline TB *jit_lookup_sealed(vaddr_t eip) {
+  jit_lookup_count ++;
+
+  /* direct-mapped TB 命中检查是 cpu_exec() 的高频路径，保持在 header 内联。 */
+  TB *tb = &jit_tb_cache[(eip >> 2) & (JIT_TB_CACHE_SIZE - 1)];
+  if (!tb->valid || tb->guest_start != eip) {
+    jit_miss_count ++;
+    return NULL;
+  }
+
+  tb->hit_count ++;
+  jit_hit_count ++;
+  if (!tb->sealed) {
+    return NULL;
+  }
+
+  /* 达到热点阈值时才进入冷路径，避免普通命中跨函数。 */
+  if (!tb->compile_attempted && tb->hit_count >= JIT_COMPILE_HIT_THRESHOLD) {
+    return jit_prepare_hot_tb(tb, eip);
+  }
+  return tb;
+}
 void jit_begin_tb_exec(TB *tb);
 void jit_end_tb_exec(uint32_t nr_instr, bool aborted);
 jit_func_t jit_emit_return(int status, uint32_t *host_size);
