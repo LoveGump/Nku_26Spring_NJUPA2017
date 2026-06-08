@@ -1687,7 +1687,11 @@ TB *jit_prepare_hot_tb(TB *tb, vaddr_t eip) {
     }
     if (tb->host_code == NULL) {
       jit_state.stats.compile_unsupported ++;
-      jit_state.stats.unsupported_opcode[vaddr_read(tb->guest_start, 1)] ++;
+      uint8_t opcode = vaddr_read(tb->guest_start, 1);
+      jit_state.stats.unsupported_opcode[opcode] ++;
+      if (opcode == 0x0f && tb->guest_end >= tb->guest_start + 2) {
+        jit_state.stats.unsupported_0f_opcode[vaddr_read(tb->guest_start + 1, 1)] ++;
+      }
       uint32_t nr_instr = tb->nr_instr <= JIT_MAX_TB_INSTR ? tb->nr_instr : JIT_MAX_TB_INSTR;
       jit_state.stats.unsupported_instr_count[nr_instr] ++;
     }

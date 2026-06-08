@@ -68,6 +68,7 @@ typedef struct {
   uint64_t compile_attempts;
   uint64_t compile_unsupported;
   uint64_t unsupported_opcode[256];
+  uint64_t unsupported_0f_opcode[256];
   uint64_t unsupported_instr_count[JIT_MAX_TB_INSTR + 1];
   uint64_t native_tbs;
   uint64_t native_instr;

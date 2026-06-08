@@ -104,6 +104,31 @@ static void display_jit_stats(void) {
   }
 
   printed_header = false;
+  memset(used, 0, sizeof(used));
+  for (int rank = 0; rank < 5; rank ++) {
+    int best = -1;
+    for (int opcode = 0; opcode < 256; opcode ++) {
+      if (!used[opcode] && stats->unsupported_0f_opcode[opcode] != 0 &&
+          (best < 0 || stats->unsupported_0f_opcode[opcode] > stats->unsupported_0f_opcode[best])) {
+        best = opcode;
+      }
+    }
+    if (best < 0) {
+      break;
+    }
+
+    if (!printed_header) {
+      printf("Unsupported 0f opcodes:");
+      printed_header = true;
+    }
+    printf(" 0f %02x=%" PRIu64, best, stats->unsupported_0f_opcode[best]);
+    used[best] = true;
+  }
+  if (printed_header) {
+    printf("\n");
+  }
+
+  printed_header = false;
   for (int nr_instr = 1; nr_instr <= JIT_MAX_TB_INSTR; nr_instr ++) {
     if (stats->unsupported_instr_count[nr_instr] == 0) {
       continue;
