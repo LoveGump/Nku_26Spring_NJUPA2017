@@ -7,11 +7,5 @@
 !init.sh
 
 report/
-
-# clangd / Bear
 compile_commands.json
 **/compile_commands.json
-.clangd
-.cache/
-**/.cache/
-nexus-am/compile_commands.json

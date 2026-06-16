@@ -15,7 +15,8 @@ uint8_t pmem[PMEM_SIZE];
 
 // 模拟内存的读写接口：物理地址读写和虚拟地址读写
 uint32_t paddr_read(paddr_t addr, int len) {
-  // 首先判断是否访问的是MMIO地址，如果是则调用mmio_read函数进行读操作，否则直接从模拟内存中读取数据
+  // 首先判断是否访问的是MMIO地址，
+  // 如果是则调用mmio_read函数进行读操作，否则直接从模拟内存中读取数据
   int map_NO = is_mmio(addr);
   if (map_NO != -1) {
     return mmio_read(addr, len, map_NO);

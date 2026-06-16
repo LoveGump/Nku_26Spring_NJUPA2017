@@ -43,7 +43,8 @@ void _putc(char ch) {
 void _halt(int code) {
   // 使用 x86 的 HLT 指令来停止 CPU 的执行
   // HLT 指令会使 CPU 进入低功耗状态，直到下一次外部中断发生
-  // code 参数可以通过寄存器传递给外部环境，或者直接作为 HLT 指令的操作数（如果支持的话）
+  // code 参数可以通过寄存器传递给外部环境，或者直接作为 HLT 指令的操作数
+  // 
   asm volatile(".byte 0xd6" : :"a"(code));
 
   // should not reach here

@@ -54,6 +54,7 @@ static regex_t re[NR_REGEX];
 
 /* Rules are used for many times.
  * Therefore we compile them only once before any usage.
+ * 初始化正则表达式，将规则中的正则表达式编译成 regex_t 结构体，存储在 re 数组中，以便后续使用
  */
 void init_regex() {
   int i;
@@ -75,12 +76,13 @@ typedef struct token {
 } Token;
 
 Token tokens[32];
-int nr_token;
+int nr_token; // 当前识别到的token数量
 
+// 将表达式字符串e解析成token数组，返回true表示成功，false表示失败
 static bool make_token(char *e) {
   int position = 0;
   int i;
-  regmatch_t pmatch;
+  regmatch_t pmatch; // 正则表达式匹配结果结构体，包含匹配的起始位置和结束位置
 
   nr_token = 0;
 
@@ -209,7 +211,7 @@ static bool check_parentheses(int p, int q) {
     return false;
   }
 
-  // 如果被括号包围，检查括号是否匹配
+  // 如果被括号包围，检查括号（数量/整体的格式）是否匹配
   int level = 0;
   int i;
   for (i = p; i <= q; i ++) {
@@ -319,7 +321,7 @@ static uint32_t eval(int p, int q, bool *success) {
     return eval(p + 1, q - 1, success);
   }
 
-  // 找到主运算符
+  // 找到主运算符，也就是优先级最低的运算符
   int op = dominant_operator(p, q);
   if (op == -1) {
     // 没有找到主运算符，表达式无效
