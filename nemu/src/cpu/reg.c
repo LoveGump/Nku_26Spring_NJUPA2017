@@ -19,6 +19,7 @@ void isa_reg_display(void) {
 }
 
 void reg_test() {
+  // 设置随机数种子，确保每次运行程序时生成的随机数不同
   srand(time(0));
   uint32_t sample[8];
   // 随机生成一个eip值，并将其赋值给cpu.eip
