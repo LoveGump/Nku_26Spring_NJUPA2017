@@ -77,7 +77,7 @@ void init_difftest(void) {
     panic("fork error");
   }
   else if (pid == 0) {
-    // child
+    // pid == 0，说明当前是子进程，执行 QEMU
 
     // install a parent death signal in the chlid
     // 当父进程死亡时，子进程会收到 SIGTERM 信号，从而可以及时退出，避免成为孤儿进程
@@ -102,25 +102,31 @@ void init_difftest(void) {
   }
   else {
     // father
+    // 父进程连接到 QEMU 的 GDB 服务器
 
     gdb_connect_qemu();
     Log("Connect to QEMU successfully");
 
+    // 注册一个退出函数，在程序结束时调用 gdb_exit 来关闭与 QEMU 的连接
     atexit(gdb_exit);
 
     // put the MBR code to QEMU to enable protected mode
+    // 将 MBR 代码写入 QEMU 的内存中，以便进入保护模式
     bool ok = gdb_memcpy_to_qemu(0x7c00, mbr, sizeof(mbr));
     assert(ok == 1);
 
-    union gdb_regs r;
+    // 获得 QEMU 中的寄存器状态
+    union gdb_regs r; 
     gdb_getregs(&r);
 
+    // 设置 cs:eip 到 0000:7c00，即 MBR 代码的起始地址
     // set cs:eip to 0000:7c00
     r.eip = 0x7c00;
     r.cs = 0x0000;
     ok = gdb_setregs(&r);
     assert(ok == 1);
 
+    // 执行足够的指令以进入保护模式
     // execute enough instructions to enter protected mode
     int i;
     for (i = 0; i < 20; i ++) {

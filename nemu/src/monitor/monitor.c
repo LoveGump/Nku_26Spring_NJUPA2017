@@ -19,6 +19,7 @@ static char *img_file = NULL;
 static int is_batch_mode = false;
 
 static inline void init_log() {
+// 在调试模式下，如果指定了日志文件路径，则打开该文件用于记录日志
 #ifdef DEBUG
   if (log_file == NULL) return;
   log_fp = fopen(log_file, "w");
@@ -52,7 +53,7 @@ static inline int load_default_img() {
   return sizeof(img);
 }
 
-// 加载镜像
+// 加载镜像文件到内存中，如果没有指定镜像文件，则加载默认的内置镜像
 static inline void load_img() {
   long size;
   if (img_file == NULL) {
@@ -67,9 +68,11 @@ static inline void load_img() {
 
     Log("The image is %s", img_file);
 
+    // 将文件指针移动到文件末尾，获取文件的大小，然后再将文件指针移动回文件开头，最后读取文件内容到内存中
     fseek(fp, 0, SEEK_END);
     size = ftell(fp);
 
+    // 将文件指针移动回文件开头
     fseek(fp, 0, SEEK_SET);
     ret = fread(guest_to_host(ENTRY_START), size, 1, fp);
     assert(ret == 1);
@@ -84,6 +87,7 @@ static inline void load_img() {
 
 static inline void restart() {
   /* Set the initial instruction pointer. */
+  // 设置初始的指令指针，即程序的入口地址
   cpu.eip = ENTRY_START;
   cpu.cs = 8;
   cpu.eflags = 0x00000002;
