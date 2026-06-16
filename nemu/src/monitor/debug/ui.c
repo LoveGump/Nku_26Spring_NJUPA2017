@@ -21,6 +21,7 @@ char* rl_gets() {
   // 获取用户输入的字符串指针
   line_read = readline("(nemu) ");
 
+  // 添加到历史记录中
   if (line_read && *line_read) {
     add_history(line_read);
   }
@@ -34,6 +35,7 @@ static int cmd_c(char *args) {
 }
 
 static int cmd_q(char *args) {
+  // 直接退出程序
   return -1;
 }
 
@@ -201,17 +203,17 @@ void ui_mainloop(int is_batch_mode) {
   }
 
   while (1) {
-    char *str = rl_gets();
-    char *str_end = str + strlen(str);
+    char *str = rl_gets(); // 获取用户输入的字符串指针
+    char *str_end = str + strlen(str);// 获取字符串末尾的指针
 
     /* extract the first token as the command */
-    char *cmd = strtok(str, " ");
+    char *cmd = strtok(str, " "); // 分割token
     if (cmd == NULL) { continue; }
 
     /* treat the remaining string as the arguments,
      * which may need further parsing
      */
-    char *args = cmd + strlen(cmd) + 1;
+    char *args = cmd + strlen(cmd) + 1; // 获取命令后的参数字符串指针
     if (args >= str_end) {
       args = NULL;
     }
@@ -224,6 +226,7 @@ void ui_mainloop(int is_batch_mode) {
     int i;
     for (i = 0; i < NR_CMD; i ++) {
       if (strcmp(cmd, cmd_table[i].name) == 0) {
+        // 执行命令对应的处理函数，如果返回值小于0，表示需要退出程序
         if (cmd_table[i].handler(args) < 0) { return; }
         break;
       }
