@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <title>&#x5e73;&#x65f6;&#x4f5c;&#x4e1a;</title>
+            <style>
+/* From extension vscode.github */
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+.vscode-dark img[src$=\#gh-light-mode-only],
+.vscode-light img[src$=\#gh-dark-mode-only],
+.vscode-high-contrast:not(.vscode-high-contrast-light) img[src$=\#gh-light-mode-only],
+.vscode-high-contrast-light img[src$=\#gh-dark-mode-only] {
+	display: none;
+}
+
+</style>
+            
+        <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/Microsoft/vscode/extensions/markdown-language-features/media/markdown.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/Microsoft/vscode/extensions/markdown-language-features/media/highlight.css">
+<style>
+            body {
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe WPC', 'Segoe UI', system-ui, 'Ubuntu', 'Droid Sans', sans-serif;
+                font-size: 14px;
+                line-height: 1.6;
+            }
+        </style>
+        <style>
+.task-list-item {
+    list-style-type: none;
+}
+
+.task-list-item-checkbox {
+    margin-left: -20px;
+    vertical-align: middle;
+    pointer-events: none;
+}
+</style>
+<style>
+:root {
+  --color-note: #0969da;
+  --color-tip: #1a7f37;
+  --color-warning: #9a6700;
+  --color-severe: #bc4c00;
+  --color-caution: #d1242f;
+  --color-important: #8250df;
+}
+
+</style>
+<style>
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-note: #2f81f7;
+    --color-tip: #3fb950;
+    --color-warning: #d29922;
+    --color-severe: #db6d28;
+    --color-caution: #f85149;
+    --color-important: #a371f7;
+  }
+}
+
+</style>
+<style>
+.markdown-alert {
+  padding: 0.5rem 1rem;
+  margin-bottom: 16px;
+  color: inherit;
+  border-left: .25em solid #888;
+}
+
+.markdown-alert>:first-child {
+  margin-top: 0
+}
+
+.markdown-alert>:last-child {
+  margin-bottom: 0
+}
+
+.markdown-alert .markdown-alert-title {
+  display: flex;
+  font-weight: 500;
+  align-items: center;
+  line-height: 1
+}
+
+.markdown-alert .markdown-alert-title .octicon {
+  margin-right: 0.5rem;
+  display: inline-block;
+  overflow: visible !important;
+  vertical-align: text-bottom;
+  fill: currentColor;
+}
+
+.markdown-alert.markdown-alert-note {
+  border-left-color: var(--color-note);
+}
+
+.markdown-alert.markdown-alert-note .markdown-alert-title {
+  color: var(--color-note);
+}
+
+.markdown-alert.markdown-alert-important {
+  border-left-color: var(--color-important);
+}
+
+.markdown-alert.markdown-alert-important .markdown-alert-title {
+  color: var(--color-important);
+}
+
+.markdown-alert.markdown-alert-warning {
+  border-left-color: var(--color-warning);
+}
+
+.markdown-alert.markdown-alert-warning .markdown-alert-title {
+  color: var(--color-warning);
+}
+
+.markdown-alert.markdown-alert-tip {
+  border-left-color: var(--color-tip);
+}
+
+.markdown-alert.markdown-alert-tip .markdown-alert-title {
+  color: var(--color-tip);
+}
+
+.markdown-alert.markdown-alert-caution {
+  border-left-color: var(--color-caution);
+}
+
+.markdown-alert.markdown-alert-caution .markdown-alert-title {
+  color: var(--color-caution);
+}
+
+</style>
+        
+        </head>
+        <body class="vscode-body vscode-light">
+            <h1 id="平时作业">平时作业</h1>
+<h2 id="问题-1浮点数有没有移位操作和扩展操作为什么">问题 1：浮点数有没有移位操作和扩展操作？为什么？</h2>
+<p>严格来说，浮点数没有整数意义上的直接移位操作，但存在浮点语义下的缩放操作，也存在扩展操作。</p>
+<p>整数可以直接看成一个二进制位串。对整数左移一位，通常相当于乘以 2；右移一位，通常相当于除以 2。因此，整数移位可以直接在位级别完成。从硬件角度看，整数移位一般由 CPU 中的移位器完成，电路结构相对简单，执行效率较高。</p>
+<p>浮点数的情况不同。常见浮点数采用 IEEE 754 标准表示，由符号位、阶码和尾数组成，其数值大致可以表示为：</p>
+<pre><code class="language-text">(-1)^符号位 * 尾数 * 2^阶码
+</code></pre>
+<p>如果直接把整个浮点数编码进行左移或右移，就会同时改变符号位、阶码和尾数的含义，得到的结果通常不是原数乘以 2 或除以 2，而是另一个完全不同的浮点编码，甚至可能成为非法或特殊编码。因此，浮点数不能像整数一样使用简单的整体位移来表示数值缩放。</p>
+<p>不过，从数学意义上看，浮点数可以实现类似“移位”的效果。例如 <code>x * 2^n</code> 可以看作浮点意义下的缩放。它的本质不是移动整个二进制编码，而是主要调整阶码，同时还要处理规格化、舍入、溢出和下溢等情况。在 C 语言中，<code>&lt;&lt;</code> 和 <code>&gt;&gt;</code> 运算符只适用于整数类型，不能用于浮点数。如果需要计算浮点数乘以 2 的 n 次方，可以使用标准库函数 <code>ldexp()</code> 或 <code>scalbn()</code>。</p>
+<pre><code class="language-c"><span class="hljs-type">double</span> y = <span class="hljs-built_in">ldexp</span>(x, n);   <span class="hljs-comment">// 计算 x * 2^n</span>
+</code></pre>
+<p>浮点数也有扩展操作。例如从单精度 <code>float</code> 转换为双精度 <code>double</code>。这种扩展不是简单补 0 或补符号位，而是按照浮点格式重新编码：保持数值尽量不变，调整阶码偏置，增加尾数精度，并正确处理 <code>+0</code>、<code>-0</code>、无穷大和 NaN 等特殊值。</p>
+<p>综上，浮点数没有普通整数那种直接的移位操作；如果要实现乘以 2 的幂，应使用浮点缩放操作。浮点数有扩展操作，但扩展过程需要遵循浮点格式，而不是简单地进行位扩展。</p>
+<h2 id="问题-2为什么整数除-0-会发生异常而浮点数不会">问题 2：为什么整数除 0 会发生异常而浮点数不会？</h2>
+<p>整数除 0 会发生异常，是因为整数系统中没有合适的值可以表示除 0 的结果。</p>
+<p>例如：</p>
+<pre><code class="language-c"><span class="hljs-number">1</span> / <span class="hljs-number">0</span>
+</code></pre>
+<p>这个表达式在数学上没有定义。在普通整数类型中，也不存在“正无穷大”“负无穷大”或“不是一个数”这样的结果。因此，CPU 执行整数除法时，如果发现除数为 0，通常会触发除零异常，由操作系统或运行时环境进行处理。</p>
+<p>浮点数除 0 的处理方式不同。IEEE 754 浮点标准定义了若干特殊值，可以表示无穷大和 NaN。因此，浮点除 0 通常可以得到一个符合标准的结果，而不是立即中断程序：</p>
+<pre><code class="language-c"><span class="hljs-number">1.0</span> / <span class="hljs-number">0.0</span>    <span class="hljs-comment">// +Infinity</span>
+<span class="hljs-number">-1.0</span> / <span class="hljs-number">0.0</span>   <span class="hljs-comment">// -Infinity</span>
+<span class="hljs-number">0.0</span> / <span class="hljs-number">0.0</span>    <span class="hljs-comment">// NaN</span>
+</code></pre>
+<p>其中，正数除以 <code>+0.0</code> 可以得到 <code>+Infinity</code>，负数除以 <code>+0.0</code> 可以得到 <code>-Infinity</code>，而 <code>0.0 / 0.0</code> 得到 <code>NaN</code>，表示“不是一个数”。浮点数还区分 <code>+0.0</code> 和 <code>-0.0</code>，因此结果的符号也可能受到影响。</p>
+<p>对应的实验程序如下：</p>
+<pre><code class="language-c"><span class="hljs-meta">#<span class="hljs-keyword">include</span> <span class="hljs-string">&quot;stdio.h&quot;</span></span>
+
+<span class="hljs-type">int</span> <span class="hljs-title function_">main</span><span class="hljs-params">()</span> {
+    <span class="hljs-type">float</span> a = <span class="hljs-number">0.1</span>;
+    <span class="hljs-type">float</span> b = <span class="hljs-number">-0.1</span>;
+    <span class="hljs-type">float</span> c = <span class="hljs-number">0.0</span>;
+
+    <span class="hljs-built_in">printf</span>(<span class="hljs-string">&quot;Float(0.1 / 0): %f\n&quot;</span>, a / <span class="hljs-number">0</span>);
+    <span class="hljs-built_in">printf</span>(<span class="hljs-string">&quot;Float(-0.1 / 0): %f\n&quot;</span>, b / <span class="hljs-number">0</span>);
+    <span class="hljs-built_in">printf</span>(<span class="hljs-string">&quot;Float(0.0 / 0): %f\n&quot;</span>, c / <span class="hljs-number">0</span>);
+
+    <span class="hljs-built_in">printf</span>(<span class="hljs-string">&quot;Float(0.1 / 0): %.20f\n&quot;</span>, a / <span class="hljs-number">0</span>);
+    <span class="hljs-built_in">printf</span>(<span class="hljs-string">&quot;Float(-0.1 / 0): %.20f\n&quot;</span>, b / <span class="hljs-number">0</span>);
+    <span class="hljs-built_in">printf</span>(<span class="hljs-string">&quot;Float(0.0 / 0): %.20f\n&quot;</span>, c / <span class="hljs-number">0</span>);
+
+    <span class="hljs-keyword">return</span> <span class="hljs-number">0</span>;
+}
+</code></pre>
+<p>实际运行结果如图 2 所示：</p>
+<p><img src="file:////home/gump/code/ics_share/assignment/assignment1/fig/2.png" alt="浮点数除 0 的运行结果"></p>
+<p>对应输出为：</p>
+<pre><code class="language-text">Float(0.1 / 0): inf
+Float(-0.1 / 0): -inf
+Float(0.0 / 0): nan
+Float(0.1 / 0): inf
+Float(-0.1 / 0): -inf
+Float(0.0 / 0): nan
+</code></pre>
+<p>由运行结果可知，正浮点数除以 0 得到 <code>inf</code>，负浮点数除以 0 得到 <code>-inf</code>，而 <code>0.0 / 0</code> 得到 <code>nan</code>。即使使用 <code>%.20f</code> 指定输出 20 位小数，特殊值仍然以 <code>inf</code>、<code>-inf</code> 和 <code>nan</code> 的形式输出。</p>
+<p>这种设计具有工程意义。在科学计算、图形渲染和大规模数值计算中，如果某个中间步骤出现除 0，程序往往不希望立刻崩溃，而是希望先产生 <code>Infinity</code> 或 <code>NaN</code>，让计算流程继续进行，最后再由程序员检查结果或异常标志。</p>
+<p>需要注意的是，浮点除 0 并不是完全没有异常。它在 IEEE 754 中仍属于浮点异常，通常会设置 divide-by-zero 等异常标志。也就是说，程序表面上没有崩溃，但 CPU 的浮点状态字或状态寄存器中已经记录了这次异常。只是默认情况下，浮点异常通常采用“不陷入”的处理方式，不会像整数除 0 那样立即进入异常处理流程。</p>
+<p>因此，整数除 0 会发生异常，是因为整数没有对应的结果表示；浮点数除 0 通常不会让程序直接异常退出，是因为 IEEE 754 提供了无穷大、NaN 和异常标志机制。</p>
+<h2 id="问题-3为什么同一个实数赋值给-float-型变量和-double-类型变量输出结果会有所不同">问题 3：为什么同一个实数赋值给 float 型变量和 double 类型变量，输出结果会有所不同？</h2>
+<p>同一个实数赋值给 <code>float</code> 和 <code>double</code> 后输出不同，根本原因是二者的精度不同。</p>
+<p>在常见的 IEEE 754 浮点格式中，<code>float</code> 通常占 32 位，有效精度约为 6 到 7 位十进制数字；<code>double</code> 通常占 64 位，有效精度约为 15 到 16 位十进制数字。因此，<code>double</code> 能保存更多有效位，通常比 <code>float</code> 更接近真实值。</p>
+<p>很多十进制小数在二进制中无法被有限位数精确表示。例如 <code>0.1</code> 在二进制中是无限循环小数，所以无论赋值给 <code>float</code> 还是 <code>double</code>，实际保存的都只是近似值：</p>
+<pre><code class="language-c"><span class="hljs-type">float</span> a = <span class="hljs-number">0.1</span>;
+<span class="hljs-type">double</span> b = <span class="hljs-number">0.1</span>;
+</code></pre>
+<p>由于 <code>float</code> 和 <code>double</code> 的尾数位数不同，它们舍入后得到的二进制近似值也不同。以 <code>0.1</code> 为例：</p>
+<table>
+<thead>
+<tr>
+<th>类型</th>
+<th>原始数值</th>
+<th>实际存储的十六进制表示</th>
+<th>十进制展开</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>float</code></td>
+<td><code>0.1</code></td>
+<td><code>0x3DCCCCCD</code></td>
+<td><code>0.10000000149011611938</code></td>
+</tr>
+<tr>
+<td><code>double</code></td>
+<td><code>0.1</code></td>
+<td><code>0x3FB999999999999A</code></td>
+<td><code>0.10000000000000000555</code></td>
+</tr>
+</tbody>
+</table>
+<p>如果输出时只保留较少的小数位，二者可能看起来相同：</p>
+<pre><code class="language-c"><span class="hljs-built_in">printf</span>(<span class="hljs-string">&quot;%f\n&quot;</span>, a);
+<span class="hljs-built_in">printf</span>(<span class="hljs-string">&quot;%f\n&quot;</span>, b);
+</code></pre>
+<p>对应的实验程序如下：</p>
+<pre><code class="language-c"><span class="hljs-meta">#<span class="hljs-keyword">include</span> <span class="hljs-string">&quot;stdio.h&quot;</span></span>
+
+<span class="hljs-type">int</span> <span class="hljs-title function_">main</span><span class="hljs-params">()</span> {
+    <span class="hljs-type">float</span> a = <span class="hljs-number">0.1</span>;
+    <span class="hljs-type">double</span> b = <span class="hljs-number">0.1</span>;
+
+    <span class="hljs-built_in">printf</span>(<span class="hljs-string">&quot;Float: %f\n&quot;</span>, a);
+    <span class="hljs-built_in">printf</span>(<span class="hljs-string">&quot;Double: %f\n&quot;</span>, b);
+
+    <span class="hljs-built_in">printf</span>(<span class="hljs-string">&quot;Float: %.20f\n&quot;</span>, a);
+    <span class="hljs-built_in">printf</span>(<span class="hljs-string">&quot;Double: %.20lf\n&quot;</span>, b);
+
+    <span class="hljs-keyword">return</span> <span class="hljs-number">0</span>;
+}
+</code></pre>
+<p>实际运行结果如图 3 所示：</p>
+<p><img src="file:////home/gump/code/ics_share/assignment/assignment1/fig/3.png" alt="float 和 double 输出结果对比"></p>
+<p>对应输出为：</p>
+<pre><code class="language-text">Float: 0.100000
+Double: 0.100000
+Float: 0.10000000149011611938
+Double: 0.10000000000000000555
+</code></pre>
+<p>由运行结果可知，当默认输出 6 位小数时，<code>float</code> 和 <code>double</code> 都显示为 <code>0.100000</code>，二者差异不明显；当输出 20 位小数时，二者保存的近似值差异就表现出来了。</p>
+<p>因此，输出结果不同并不是输出函数出错，而是 <code>float</code> 和 <code>double</code> 在内存中保存的近似值本身就不同。</p>
+<h2 id="问题-4为什么-float-情况下输出的结果会比原来的大这到底有没有根本性原因还是随机发生的为什么会出现这样的情况">问题 4：为什么 float 情况下输出的结果会比原来的大？这到底有没有根本性原因还是随机发生的？为什么会出现这样的情况？</h2>
+<p><code>float</code> 输出结果比原来的十进制数大，并不是随机现象，而是二进制浮点表示和舍入规则共同作用的结果。</p>
+<p>计算机中的 <code>float</code> 只能使用有限个二进制位保存小数。但许多十进制小数无法用有限二进制小数精确表示。例如：</p>
+<pre><code class="language-text">0.1(十进制) = 0.000110011001100110011... (二进制)
+</code></pre>
+<p>这个二进制表示是无限循环的，而 <code>float</code> 的尾数位数有限，所以只能选择一个最接近的可表示浮点数保存。真实值与保存值之间的差异称为舍入误差。</p>
+<p>浮点数的舍入并不是随意进行的，而是由舍入模式决定的。常见默认模式是“舍入到最接近的值，平衡取偶”，即 round to nearest, ties to even。它会优先选择离真实值最近的可表示浮点数；如果真实值恰好位于两个可表示数的正中间，则选择末位为偶数的那个，以减少长期计算中的统计偏差。</p>
+<p>以 <code>0.1</code>、<code>0.7</code> 和 <code>0.5</code> 为例，可以通过下面的程序观察三种情况：</p>
+<pre><code class="language-c"><span class="hljs-meta">#<span class="hljs-keyword">include</span> <span class="hljs-string">&quot;stdio.h&quot;</span></span>
+
+<span class="hljs-type">int</span> <span class="hljs-title function_">main</span><span class="hljs-params">()</span> {
+    <span class="hljs-type">float</span> a = <span class="hljs-number">0.1</span>;
+    <span class="hljs-type">float</span> b = <span class="hljs-number">0.7</span>;
+    <span class="hljs-type">float</span> c = <span class="hljs-number">0.5</span>;
+
+    <span class="hljs-built_in">printf</span>(<span class="hljs-string">&quot;Float(0.1): %f\n&quot;</span>, a);
+    <span class="hljs-built_in">printf</span>(<span class="hljs-string">&quot;Float(0.7): %f\n&quot;</span>, b);
+    <span class="hljs-built_in">printf</span>(<span class="hljs-string">&quot;Float(0.5): %f\n&quot;</span>, c);
+
+    <span class="hljs-built_in">printf</span>(<span class="hljs-string">&quot;Float(0.1): %.20f\n&quot;</span>, a);
+    <span class="hljs-built_in">printf</span>(<span class="hljs-string">&quot;Float(0.7): %.20f\n&quot;</span>, b);
+    <span class="hljs-built_in">printf</span>(<span class="hljs-string">&quot;Float(0.5): %.20f\n&quot;</span>, c);
+
+    <span class="hljs-keyword">return</span> <span class="hljs-number">0</span>;
+}
+</code></pre>
+<p>实际运行结果如图 4 所示：</p>
+<p><img src="file:////home/gump/code/ics_share/assignment/assignment1/fig/4.png" alt="float 舍入方向对比"></p>
+<p>对应输出为：</p>
+<pre><code class="language-text">Float(0.1): 0.100000
+Float(0.7): 0.700000
+Float(0.5): 0.500000
+Float(0.1): 0.10000000149011611938
+Float(0.7): 0.69999998807907104492
+Float(0.5): 0.50000000000000000000
+</code></pre>
+<p>由运行结果可知，默认只输出 6 位小数时，<code>0.1</code>、<code>0.7</code> 和 <code>0.5</code> 的误差不明显；当输出 20 位小数时，差异就显现出来。<code>0.1</code> 在 <code>float</code> 中实际保存的值略大于原数，<code>0.7</code> 在 <code>float</code> 中实际保存的值略小于原数，而 <code>0.5</code> 可以被精确表示。</p>
+<p>出现这种差异的原因是：真实的 <code>0.1</code> 和 <code>0.7</code> 都位于两个相邻的 <code>float</code> 可表示数之间。<code>0.1</code> 按照舍入规则落到了右侧的可表示值，因此结果略大；<code>0.7</code> 按照舍入规则落到了左侧的可表示值，因此结果略小。<code>0.5</code> 等于 <code>1/2</code>，可以写成有限二进制小数，因此能够被精确表示。</p>
+<p>因此，并不是所有十进制小数转换为 <code>float</code> 后都会变大。有些数会被舍入到略小的值，有些数则可以被精确表示。例如，<code>0.5</code>、<code>0.25</code>、<code>0.125</code> 分别等于 <code>1/2</code>、<code>1/4</code>、<code>1/8</code>，可以用有限二进制小数精确表示。</p>
+<p>综上，<code>float</code> 输出结果偏大或偏小都有明确原因：十进制小数无法精确转换为有限位二进制浮点数，经过舍入后可能落到比原数稍大的可表示值，也可能落到比原数稍小的可表示值。具体偏大还是偏小，取决于原数在两个相邻可表示浮点数之间的位置以及当前采用的舍入模式。</p>
+<p>如果程序需要精确保存十进制小数，例如金额计算，就不应该直接依赖普通二进制浮点数。更合适的做法是使用十进制浮点类型、专门的 decimal 库，或者采用定点数方法，例如把金额统一转换成“分”这样的整数单位进行保存和计算。</p>
+
+            
+            
+        </body>
+        </html>

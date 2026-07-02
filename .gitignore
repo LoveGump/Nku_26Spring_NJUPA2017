@@ -6,4 +6,5 @@
 !.gitignore
 !init.sh
 !PA_homework/
+!PA_homework/**
 report/
